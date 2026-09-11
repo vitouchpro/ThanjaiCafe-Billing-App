@@ -6,6 +6,8 @@ import { useTheme, useOnlineStatus } from '@/hooks';
 import { Spinner, ToastHost } from '@/components/ui';
 import { Coffee } from 'lucide-react';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { startSync } from '@/services/api/sync';
+import { httpTransport, isBackupConfigured } from '@/services/api/httpTransport';
 
 /* The customer ordering pages are not part of the till. They read the published
    menu from the cloud and never touch IndexedDB, so they must not wait behind
@@ -41,6 +43,25 @@ function AppShell() {
     // Seeding the till is pointless on a diner's phone.
     if (!customer) void init();
   }, [init, customer]);
+
+  /* Drain the bill backup queue.
+
+     Every bill is saved locally with `synced: 0` and this is what finally
+     clears it — the queue, its retry and its backoff were written long ago but
+     never started, so bills accumulated in one browser with nothing pushing
+     them anywhere. It runs only on staff routes: a diner's phone has no bills.
+
+     Failures are swallowed by design. Backing up is not something a cashier
+     should ever be blocked by, and sync.ts already handles retry and backoff
+     internally, so a dead connection simply means the queue drains later. */
+  useEffect(() => {
+    if (customer || !isBackupConfigured()) return;
+    try {
+      return startSync(httpTransport());
+    } catch (err) {
+      console.error('Bill backup could not start; bills stay queued locally:', err);
+    }
+  }, [customer]);
 
   if (customer) return <AppRoutes />;
   return ready ? <AppRoutes /> : <BootScreen />;
