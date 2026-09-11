@@ -28,3 +28,6 @@ DEPLOY-STEPS.md
 apply-migrations*.sql
 PUBLISH_TOKEN.txt
 table-qr-codes*.html
+
+.vercel
+.env*
