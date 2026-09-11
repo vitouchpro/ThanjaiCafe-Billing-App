@@ -1,0 +1,30 @@
+node_modules
+dist
+dist-ssr
+*.local
+
+# Verification screenshots (scripts are kept)
+.verify/*.png
+
+.DS_Store
+.idea
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Image sourcing scratch
+.tmp
+
+logs
+*.log
+npm-debug.log*
+
+# Local setup helpers: these carry secrets and must never be committed.
+DEPLOY-STEPS.md
+apply-migrations*.sql
+PUBLISH_TOKEN.txt
+table-qr-codes*.html

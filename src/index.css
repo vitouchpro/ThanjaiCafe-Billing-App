@@ -1,0 +1,211 @@
+@import "tailwindcss";
+
+/* ============================================================
+   THANJAI CAFE — design tokens
+   Warm coffee / cream foundation, high contrast, large targets.
+   ============================================================ */
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-numeric: "Roboto Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --radius-card: 14px;
+  --radius-tile: 18px;
+
+  --breakpoint-xs: 26rem;
+}
+
+:root {
+  color-scheme: light;
+
+  /* Accent — overridden by the accent switcher in Appearance settings */
+  --accent-50: 32 46% 96%;
+  --accent-100: 30 44% 90%;
+  --accent-300: 26 40% 66%;
+  --accent-500: 24 52% 38%;
+  --accent-600: 22 56% 32%;
+  --accent-700: 20 58% 25%;
+  --accent-fg: 34 60% 97%;
+
+  /* Neutral surfaces */
+  --bg: 36 34% 96%;
+  --surface: 0 0% 100%;
+  --surface-2: 34 30% 97%;
+  --surface-3: 33 26% 93%;
+  --border: 32 20% 86%;
+  --border-strong: 30 18% 74%;
+
+  --text: 24 22% 12%;
+  --text-2: 26 12% 38%;
+  --text-3: 28 10% 53%;
+
+  --success: 152 55% 32%;
+  --success-bg: 152 50% 94%;
+  --danger: 358 62% 46%;
+  --danger-bg: 358 70% 96%;
+  --warning: 36 88% 42%;
+  --warning-bg: 40 90% 94%;
+  --info: 212 62% 44%;
+  --info-bg: 212 70% 95%;
+
+  --shadow-sm: 0 1px 2px hsl(28 25% 20% / 0.06), 0 1px 1px hsl(28 25% 20% / 0.04);
+  --shadow-md: 0 4px 14px hsl(28 25% 20% / 0.08);
+  --shadow-lg: 0 12px 34px hsl(28 25% 20% / 0.14);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --accent-50: 24 20% 18%;
+  --accent-100: 24 24% 24%;
+  --accent-300: 26 42% 52%;
+  --accent-500: 27 62% 56%;
+  --accent-600: 26 58% 48%;
+  --accent-700: 25 52% 40%;
+  --accent-fg: 24 40% 10%;
+
+  --bg: 26 16% 9%;
+  --surface: 26 14% 13%;
+  --surface-2: 26 13% 16%;
+  --surface-3: 26 12% 21%;
+  --border: 26 11% 24%;
+  --border-strong: 26 10% 36%;
+
+  --text: 34 30% 95%;
+  --text-2: 32 12% 74%;
+  --text-3: 30 9% 58%;
+
+  --success: 152 48% 58%;
+  --success-bg: 152 30% 18%;
+  --danger: 358 70% 66%;
+  --danger-bg: 358 32% 20%;
+  --warning: 38 82% 62%;
+  --warning-bg: 38 34% 19%;
+  --info: 210 72% 66%;
+  --info-bg: 210 34% 20%;
+
+  --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.4);
+  --shadow-md: 0 4px 14px hsl(0 0% 0% / 0.45);
+  --shadow-lg: 0 12px 34px hsl(0 0% 0% / 0.55);
+}
+
+@theme inline {
+  --color-bg: hsl(var(--bg));
+  --color-surface: hsl(var(--surface));
+  --color-surface-2: hsl(var(--surface-2));
+  --color-surface-3: hsl(var(--surface-3));
+  --color-line: hsl(var(--border));
+  --color-line-strong: hsl(var(--border-strong));
+
+  --color-ink: hsl(var(--text));
+  --color-ink-2: hsl(var(--text-2));
+  --color-ink-3: hsl(var(--text-3));
+
+  --color-accent-50: hsl(var(--accent-50));
+  --color-accent-100: hsl(var(--accent-100));
+  --color-accent-300: hsl(var(--accent-300));
+  --color-accent: hsl(var(--accent-500));
+  --color-accent-600: hsl(var(--accent-600));
+  --color-accent-700: hsl(var(--accent-700));
+  --color-accent-fg: hsl(var(--accent-fg));
+
+  --color-success: hsl(var(--success));
+  --color-success-bg: hsl(var(--success-bg));
+  --color-danger: hsl(var(--danger));
+  --color-danger-bg: hsl(var(--danger-bg));
+  --color-warning: hsl(var(--warning));
+  --color-warning-bg: hsl(var(--warning-bg));
+  --color-info: hsl(var(--info));
+  --color-info-bg: hsl(var(--info-bg));
+}
+
+@layer base {
+  * { border-color: hsl(var(--border)); }
+
+  html, body, #root { height: 100%; }
+
+  body {
+    background-color: hsl(var(--bg));
+    color: hsl(var(--text));
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+  }
+
+  /* Tabular figures everywhere money appears */
+  .tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+  :focus-visible {
+    outline: 2px solid hsl(var(--accent-500));
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border-strong) / 0.6);
+    border-radius: 99px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover { background-color: hsl(var(--border-strong)); background-clip: content-box; }
+}
+
+@layer components {
+  /* Generated product tile — hue comes from the product name, lightness from
+     the active theme so it sits correctly in both. */
+  .product-thumb {
+    background: linear-gradient(
+      140deg,
+      hsl(var(--thumb-hue) 42% 88%),
+      hsl(calc(var(--thumb-hue) + 28) 38% 78%)
+    );
+  }
+  .product-thumb > span { color: hsl(var(--thumb-hue) 55% 26%); }
+
+  .dark .product-thumb {
+    background: linear-gradient(
+      140deg,
+      hsl(var(--thumb-hue) 24% 26%),
+      hsl(calc(var(--thumb-hue) + 28) 22% 20%)
+    );
+  }
+  .dark .product-thumb > span { color: hsl(var(--thumb-hue) 48% 74%); }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { scrollbar-width: none; }
+
+  .safe-b { padding-bottom: env(safe-area-inset-bottom, 0px); }
+
+  /* Compact card density from Appearance settings */
+  .density-compact .dense-p { padding: 0.625rem; }
+  .density-comfortable .dense-p { padding: 1rem; }
+}
+
+@media print {
+  body { background: #fff; }
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+}
+
+.print-only { display: none; }
+
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.animate-pop { animation: pop-in 0.16s ease-out; }
+
+@keyframes slide-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.animate-sheet { animation: slide-up 0.22s cubic-bezier(0.32, 0.72, 0, 1); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
