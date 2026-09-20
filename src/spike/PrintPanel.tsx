@@ -3,8 +3,8 @@ import { printBrowserTest, printViaWebSerial, printViaWebUsb } from './print';
 
 export function PrintPanel() {
   const [result, setResult] = useState('');
-  const run = (fn: () => Promise<string> | void) => async () => {
-    try { setResult((await fn()) ?? 'started'); } catch (e) { setResult(`FAILED: ${e instanceof Error ? e.message : String(e)}`); }
+  const run = (fn: () => Promise<string> | string | void) => async () => {
+    try { setResult((await fn()) ?? 'done'); } catch (e) { setResult(`FAILED: ${e instanceof Error ? e.message : String(e)}`); }
   };
   return (
     <section>

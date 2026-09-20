@@ -17,6 +17,11 @@ export function PerfPanel({ ctx }: { ctx: DeviceContext | null }) {
   }
 
   async function run() {
+    // Pick a real invoice number from the seeded data so the lookup returns exactly one row.
+    let sampleRows = await db.getAll<{ invoice_no: string }>('SELECT invoice_no FROM bills_perf LIMIT 1 OFFSET 50000');
+    if (sampleRows.length === 0) sampleRows = await db.getAll<{ invoice_no: string }>('SELECT invoice_no FROM bills_perf LIMIT 1 OFFSET 0');
+    if (sampleRows.length === 0) { setProgress('Seed first'); return; }
+    const sample = sampleRows[0];
     const today = businessDate(new Date());
     const weekAgo = businessDate(new Date(Date.now() - 7 * 86_400_000));
     setResults([
@@ -27,7 +32,7 @@ export function PerfPanel({ ctx }: { ctx: DeviceContext | null }) {
       await measure('last 7 days by day', () =>
         db.getAll('SELECT business_date, COUNT(*) AS bills, SUM(total_paise) AS total FROM bills_perf WHERE business_date >= ? GROUP BY business_date ORDER BY business_date', [weekAgo])),
       await measure('find by invoice number', () =>
-        db.getAll('SELECT id FROM bills_perf WHERE invoice_no = ?', ['T1/2627/000001'])),
+        db.getAll('SELECT id FROM bills_perf WHERE invoice_no = ?', [sample.invoice_no])),
     ]);
   }
 
