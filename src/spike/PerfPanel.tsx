@@ -1,0 +1,62 @@
+import { useState } from 'react';
+import { db } from './powersync/db';
+import { businessDate } from './invoice';
+import { PERF_TARGETS, measure, seedPerfBills, type Measurement } from './perf';
+import type { DeviceContext } from './createBill';
+
+export function PerfPanel({ ctx }: { ctx: DeviceContext | null }) {
+  const [progress, setProgress] = useState('');
+  const [results, setResults] = useState<Measurement[]>([]);
+
+  async function seed() {
+    if (!ctx) { setProgress('Sign in first'); return; }
+    await db.execute('DELETE FROM bills_perf');
+    const t0 = performance.now();
+    await seedPerfBills(db, ctx, 100_000, (n) => setProgress(`${n} / 100000`));
+    setProgress(`Seeded 100000 rows in ${Math.round(performance.now() - t0)} ms`);
+  }
+
+  async function run() {
+    const today = businessDate(new Date());
+    const weekAgo = businessDate(new Date(Date.now() - 7 * 86_400_000));
+    setResults([
+      await measure('first page of history (limit 50)', () =>
+        db.getAll('SELECT id, invoice_no, total_paise, created_at FROM bills_perf ORDER BY created_at DESC LIMIT 50')),
+      await measure('today dashboard (group by payment)', () =>
+        db.getAll('SELECT payment_method, COUNT(*) AS bills, SUM(total_paise) AS total FROM bills_perf WHERE business_date = ? GROUP BY payment_method', [today])),
+      await measure('last 7 days by day', () =>
+        db.getAll('SELECT business_date, COUNT(*) AS bills, SUM(total_paise) AS total FROM bills_perf WHERE business_date >= ? GROUP BY business_date ORDER BY business_date', [weekAgo])),
+      await measure('find by invoice number', () =>
+        db.getAll('SELECT id FROM bills_perf WHERE invoice_no = ?', ['T1/2627/000001'])),
+    ]);
+  }
+
+  const limit = (label: string) =>
+    label.startsWith('first page') ? PERF_TARGETS.firstPageMs
+      : label.startsWith('today') ? PERF_TARGETS.todayDashboardMs : null;
+
+  return (
+    <section>
+      <h3>Performance (test 5)</h3>
+      <p>Run on the slowest device you have. Cores: {navigator.hardwareConcurrency}, memory hint: {String((navigator as { deviceMemory?: number }).deviceMemory ?? 'n/a')} GB</p>
+      <button onClick={() => void seed()}>Seed 100k local rows</button>{' '}
+      <button onClick={() => void run()}>Run queries</button>
+      <pre>{progress}</pre>
+      <table>
+        <thead><tr><th>query</th><th>median ms</th><th>min</th><th>max</th><th>rows</th><th>target</th></tr></thead>
+        <tbody>
+          {results.map((r) => {
+            const t = limit(r.label);
+            return (
+              <tr key={r.label}>
+                <td>{r.label}</td><td>{r.medianMs.toFixed(1)}</td><td>{r.minMs.toFixed(1)}</td>
+                <td>{r.maxMs.toFixed(1)}</td><td>{r.rows}</td>
+                <td>{t === null ? '-' : r.medianMs < t ? `PASS (<${t})` : `FAIL (>=${t})`}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </section>
+  );
+}
