@@ -1,5 +1,7 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { priceOrder, type RequestedLine } from './pricing.ts';
+import { buildCorsHeaders } from '../_shared/cors.ts';
+import { CREATE_ORDER_LIMITS, clientIp, isOverLimit, rateLimitKey } from '../_shared/rateLimit.ts';
 
 /* Prices a cart and opens a Razorpay payment for it.
 
@@ -11,15 +13,19 @@ import { priceOrder, type RequestedLine } from './pricing.ts';
    There is no sign-in. A diner gives nothing: the order is identified by the
    table they scanned and the token called out to them. So every value in the
    request is untrusted, and the prices come from the published menu — never
-   from the phone. */
-
-const cors = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, content-type',
-};
+   from the phone. The endpoint is anonymous and money follows it, so callers
+   are also rate limited per table. */
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
+  const { headers: cors, allowed } = buildCorsHeaders(
+    req.headers.get('origin'),
+    Deno.env.get('ALLOWED_ORIGINS'),
+  );
+
+  if (req.method === 'OPTIONS') {
+    return new Response(allowed ? 'ok' : 'forbidden', { status: allowed ? 200 : 403, headers: cors });
+  }
+  if (!allowed) return json({ error: 'This origin is not allowed.' }, 403, cors);
 
   try {
     const admin = createClient(
@@ -34,14 +40,40 @@ Deno.serve(async (req) => {
        kitchen ticket, so it must not carry markup or run long. */
     const tableCode = (body.tableCode ?? '').trim();
     if (!/^[A-Za-z0-9 _-]{1,12}$/.test(tableCode)) {
-      return json({ error: 'This link is missing a valid table. Please rescan the code on your table.' }, 400);
+      return json({ error: 'This link is missing a valid table. Please rescan the code on your table.' }, 400, cors);
+    }
+
+    /* Bound how fast one caller, and one table, can open orders. If the limiter
+       itself fails we log and carry on: a broken counter must never stop a
+       diner from paying. */
+    const ip = clientIp(req);
+    const [perIp, perTable] = await Promise.all([
+      admin.rpc('bump_rate_limit', {
+        p_key: rateLimitKey('create-order', ip, tableCode),
+        p_window_seconds: CREATE_ORDER_LIMITS.perIpPerTable.windowSeconds,
+      }),
+      admin.rpc('bump_rate_limit', {
+        p_key: rateLimitKey('create-order', 'table', tableCode),
+        p_window_seconds: CREATE_ORDER_LIMITS.perTable.windowSeconds,
+      }),
+    ]);
+    if (perIp.error || perTable.error) {
+      console.error('create-order: rate limiter unavailable', perIp.error ?? perTable.error);
+    } else if (
+      isOverLimit(Number(perIp.data), CREATE_ORDER_LIMITS.perIpPerTable.max) ||
+      isOverLimit(Number(perTable.data), CREATE_ORDER_LIMITS.perTable.max)
+    ) {
+      return json(
+        { error: 'Too many orders from this table right now. Please wait a minute and try again.' },
+        429, cors, { 'Retry-After': '60' },
+      );
     }
 
     const { data: menu, error: menuErr } = await admin
       .from('menu_items').select('id, name, price, tax_rate, available');
     if (menuErr) {
       console.error('create-order: menu read failed', menuErr);
-      return json({ error: 'Could not load the menu. Please try again.' }, 500);
+      return json({ error: 'Could not load the menu. Please try again.' }, 500, cors);
     }
 
     // Repriced from the published menu. The phone's prices are display only.
@@ -50,13 +82,13 @@ Deno.serve(async (req) => {
     // Razorpay's minimum is 100 paise; a smaller total would fail there with a
     // message a diner cannot act on.
     if (Math.round(totals.total * 100) < 100) {
-      return json({ error: 'This order is below the minimum online payment of ₹1. Please order at the counter.' }, 400);
+      return json({ error: 'This order is below the minimum online payment of ₹1. Please order at the counter.' }, 400, cors);
     }
 
     const { data: tokenRow, error: tokenErr } = await admin.rpc('next_order_token');
     if (tokenErr) {
       console.error('create-order: token allocation failed', tokenErr);
-      return json({ error: 'Could not start the order. Please try again.' }, 500);
+      return json({ error: 'Could not start the order. Please try again.' }, 500, cors);
     }
     const token = String(tokenRow ?? 'A-00');
 
@@ -73,7 +105,7 @@ Deno.serve(async (req) => {
 
     if (draftErr) {
       console.error('create-order: draft insert failed', draftErr);
-      return json({ error: 'Could not start the order. Please try again.' }, 500);
+      return json({ error: 'Could not start the order. Please try again.' }, 500, cors);
     }
 
     const keyId = Deno.env.get('RAZORPAY_KEY_ID')!;
@@ -98,7 +130,7 @@ Deno.serve(async (req) => {
       // than leaving it for the purge.
       await admin.from('pending_orders').delete().eq('id', draft.id);
       console.error('create-order: razorpay rejected the order', await rzpRes.text());
-      return json({ error: 'Could not start the payment. Please try again.' }, 502);
+      return json({ error: 'Could not start the payment. Please try again.' }, 502, cors);
     }
 
     const rzp = await rzpRes.json();
@@ -111,7 +143,7 @@ Deno.serve(async (req) => {
     if (linkErr) {
       await admin.from('pending_orders').delete().eq('id', draft.id);
       console.error('create-order: could not link draft to razorpay order', linkErr);
-      return json({ error: 'Could not start the payment. Please try again.' }, 500);
+      return json({ error: 'Could not start the payment. Please try again.' }, 500, cors);
     }
 
     return json({
@@ -122,15 +154,21 @@ Deno.serve(async (req) => {
       amount: rzp.amount,
       currency: rzp.currency,
       keyId,
-    });
+    }, 200, cors);
   } catch (err) {
     // priceOrder's messages are deliberately specific — they name a sold-out
     // item or a bad quantity, which is something the diner can fix.
-    return json({ error: err instanceof Error ? err.message : 'Could not create the order' }, 400);
+    return json({ error: err instanceof Error ? err.message : 'Could not create the order' }, 400, cors);
   }
 });
 
-const json = (body: unknown, status = 200) =>
+const json = (
+  body: unknown,
+  status: number,
+  cors: Record<string, string>,
+  extra: Record<string, string> = {},
+) =>
   new Response(JSON.stringify(body), {
-    status, headers: { ...cors, 'Content-Type': 'application/json' },
+    status,
+    headers: { ...cors, ...extra, 'Content-Type': 'application/json' },
   });
