@@ -33,13 +33,18 @@ function Panel() {
   const [queue, setQueue] = useState<{ count: number; size: number | null }>({ count: 0, size: null });
   const [message, setMessage] = useState('');
   const [syncMs, setSyncMs] = useState<number | null>(null);
+  const [uploadInfo, setUploadInfo] = useState({
+    discarded: connector.discardedTransactions,
+    lastError: connector.lastUploadError,
+    lastOkAt: connector.lastUploadOkAt,
+  });
   const connectedAt = useRef<number | null>(null);
 
   const bills = useQuery<{ id: string; invoice_no: string; total_paise: number; created_at: string }>(
     'SELECT id, invoice_no, total_paise, created_at FROM bills ORDER BY created_at DESC LIMIT 20',
   );
-  const counts = useQuery<{ bills: number; lines: number; products: number }>(
-    'SELECT (SELECT COUNT(*) FROM bills) AS bills, (SELECT COUNT(*) FROM bill_lines) AS lines, (SELECT COUNT(*) FROM products) AS products',
+  const counts = useQuery<{ shops: number; devices: number; bills: number; lines: number; products: number }>(
+    'SELECT (SELECT COUNT(*) FROM shops) AS shops, (SELECT COUNT(*) FROM devices) AS devices, (SELECT COUNT(*) FROM bills) AS bills, (SELECT COUNT(*) FROM bill_lines) AS lines, (SELECT COUNT(*) FROM products) AS products',
   );
   const codeRow = useQuery<{ code: string }>('SELECT code FROM devices WHERE id = ?', [claims?.deviceId ?? '']);
 
@@ -53,7 +58,14 @@ function Panel() {
         }
       },
     });
-    const timer = setInterval(() => { void db.getUploadQueueStats().then(setQueue); }, 1000);
+    const timer = setInterval(() => {
+      void db.getUploadQueueStats().then(setQueue);
+      setUploadInfo({
+        discarded: connector.discardedTransactions,
+        lastError: connector.lastUploadError,
+        lastOkAt: connector.lastUploadOkAt,
+      });
+    }, 1000);
     return () => { dispose(); clearInterval(timer); };
   }, []);
 
@@ -82,7 +94,14 @@ function Panel() {
   }
 
   async function signOut() {
+    const stats = await db.getUploadQueueStats();
+    if (stats.count > 0) {
+      setMessage(`Refusing to wipe local data: ${stats.count} upload(s) not yet on the server. Wait for the upload queue to reach 0.`);
+      return;
+    }
     await db.disconnectAndClear();
+    setSyncMs(null);
+    connectedAt.current = null;
     await connector.logout();
     setClaims(null);
     setMessage('Signed out; local data wiped');
@@ -118,7 +137,12 @@ function Panel() {
           connected={String(status.connected)} hasSynced={String(status.hasSynced)}{'\n'}
           uploading={String(status.dataFlowStatus?.uploading)} downloading={String(status.dataFlowStatus?.downloading)}{'\n'}
           upload queue={queue.count} first sync took={syncMs === null ? 'n/a' : `${syncMs} ms`}{'\n'}
-          local rows={JSON.stringify(counts.data[0] ?? {})}
+          local rows={JSON.stringify(counts.data[0] ?? {})}{'\n'}
+          {uploadInfo.discarded > 0 ? '!!! ' : ''}discarded uploads={uploadInfo.discarded}{'\n'}
+          {uploadInfo.lastError ? '!!! ' : ''}last upload error={uploadInfo.lastError
+            ? `${uploadInfo.lastError.table} ${uploadInfo.lastError.op} ${uploadInfo.lastError.code} ${uploadInfo.lastError.message} discarded=${uploadInfo.lastError.discarded} at ${uploadInfo.lastError.at}`
+            : 'none'}{'\n'}
+          last upload ok={uploadInfo.lastOkAt ?? 'never'}
         </pre>
         <p>{message}</p>
       </section>

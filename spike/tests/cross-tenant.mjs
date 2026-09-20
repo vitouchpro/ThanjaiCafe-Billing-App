@@ -50,6 +50,10 @@ check('exactly one copy exists', rows.data?.length === 1);
 r = await clientA1.from('bills').insert(bill(b1));
 check('cannot insert a bill for another shop', r.error?.code === '42501', r.error?.code);
 
+// 2b. The same refusal must hold for the uploader's shape (upsert with ignoreDuplicates).
+r = await clientA1.from('bills').upsert(bill(b1), { ignoreDuplicates: true });
+check('cannot upsert (uploader shape) a bill for another shop', r.error?.code === '42501', r.error?.code ?? 'no error');
+
 // 3. Cannot write as another device of the same shop.
 r = await clientA1.from('bills').insert(bill(a1, { device_id: a2.deviceId }));
 check('cannot write as a different device', r.error?.code === '42501', r.error?.code);
@@ -101,6 +105,15 @@ check('shop A inserts a valid line for its own bill', !r.error, r.error?.message
 const seenLineByA = await clientA1.from('bill_lines').select('id').eq('id', lineB.id);
 check('shop A cannot read shop B\'s line', (seenLineByA.data ?? []).length === 0 && !seenLineByA.error);
 
+// 6b. bill_lines are append-only: update and delete must leave the line untouched.
+// (No error code is required: a policy may raise an error or silently affect zero rows.)
+await clientA1.from('bill_lines').update({ qty: 99 }).eq('id', lineAOwn.id);
+await clientA1.from('bill_lines').delete().eq('id', lineAOwn.id);
+const lineAfter = await clientA1.from('bill_lines').select('id, qty').eq('id', lineAOwn.id);
+check('a bill line cannot be edited or deleted',
+  !lineAfter.error && lineAfter.data?.length === 1 && Number(lineAfter.data[0].qty) === 1,
+  JSON.stringify(lineAfter.data ?? lineAfter.error?.message));
+
 // 7. products: test read scope, insert, and update restrictions.
 const productsA = await clientA1.from('products').select('shop_id');
 check('shop A selects >0 products and all have shop_id = A',
@@ -120,6 +133,35 @@ r = await clientA1.from('products').update({ name: 'Hacked' }).eq('id', productB
 const productBAfter = await clientB1.from('products').select('name').eq('id', productBId);
 check('cannot update another shop\'s product', productBAfter.data?.[0]?.name === originalName);
 
+// 7b. Same-shop merge upsert (the non-append-only upload path) must work.
+const ownProducts = await clientA1.from('products').select('id, name, unit, price_paise').limit(1);
+check('shop A can read one of its own products', !ownProducts.error && (ownProducts.data ?? []).length === 1, ownProducts.error?.message);
+const ownProduct = ownProducts.data?.[0];
+if (ownProduct) {
+  const editedName = `${ownProduct.name} (edited)`;
+  r = await clientA1.from('products').upsert({
+    id: ownProduct.id, shop_id: a1.shopId, name: editedName, unit: ownProduct.unit, price_paise: ownProduct.price_paise,
+  });
+  check('same-shop merge upsert succeeds', !r.error, r.error?.message);
+  const edited = await clientA1.from('products').select('name').eq('id', ownProduct.id);
+  check('same-shop merge upsert changed the name', edited.data?.[0]?.name === editedName, edited.data?.[0]?.name);
+  // Restore the original name so the seed data is left as found.
+  r = await clientA1.from('products').upsert({
+    id: ownProduct.id, shop_id: a1.shopId, name: ownProduct.name, unit: ownProduct.unit, price_paise: ownProduct.price_paise,
+  });
+  check('original product name restored', !r.error, r.error?.message);
+}
+
+// 7c. Cross-shop merge upsert must not change shop B's product (it may error or affect zero rows).
+await clientA1.from('products').upsert({
+  id: productBId, shop_id: a1.shopId, name: 'Hacked', unit: 'pcs', price_paise: 1,
+});
+const productBAfterUpsert = await clientB1.from('products').select('name, shop_id').eq('id', productBId);
+check('cross-shop merge upsert leaves the other shop product unchanged',
+  productBAfterUpsert.data?.length === 1 && productBAfterUpsert.data[0].name === originalName
+    && productBAfterUpsert.data[0].shop_id === b1.shopId,
+  JSON.stringify(productBAfterUpsert.data ?? productBAfterUpsert.error?.message));
+
 // 8. devices: test read scope.
 const devicesA = await clientA1.from('devices').select('code');
 check('shop A sees exactly its two devices (T1, T2)',
@@ -130,6 +172,15 @@ const { data: { session } } = await clientA1.auth.getSession();
 const claims = JSON.parse(Buffer.from(session.access_token.split('.')[1], 'base64url').toString());
 check('token carries shop_id and device_id', claims.shop_id === a1.shopId && claims.device_id === a1.deviceId);
 check('app_metadata carries the same shop_id', claims.app_metadata?.shop_id === a1.shopId);
+
+// 10. Anonymous (not signed in) clients must read nothing from any table.
+// An error (permission denied) also counts as "nothing readable", so it passes the same way as zero rows.
+const anonClient = createClient(url, anon, { auth: { persistSession: false } });
+for (const table of ['shops', 'devices', 'products', 'bills', 'bill_lines']) {
+  const res = await anonClient.from(table).select('id');
+  check(`anonymous client reads nothing from ${table}`, (res.data ?? []).length === 0,
+    res.error ? `error: ${res.error.code ?? res.error.message}` : `${(res.data ?? []).length} rows`);
+}
 
 console.log(failures === 0 ? '\nAll cross-tenant checks passed.' : `\n${failures} check(s) FAILED.`);
 process.exit(failures === 0 ? 0 : 1);

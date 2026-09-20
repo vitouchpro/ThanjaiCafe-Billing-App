@@ -34,13 +34,13 @@ export async function printViaWebUsb(kickDrawer: boolean): Promise<string> {
 }
 
 /** Web Serial: for printers that appear as a COM port. */
-export async function printViaWebSerial(kickDrawer: boolean): Promise<string> {
+export async function printViaWebSerial(kickDrawer: boolean, baudRate = 9600): Promise<string> {
   // Guard first, before any await, so the user gesture is preserved for requestPort.
   if (!('serial' in navigator)) {
     throw new Error('Web Serial is not available in this browser (use Chrome or Edge over HTTPS or localhost)');
   }
   const port = await navigator.serial.requestPort();
-  await port.open({ baudRate: 9600 });
+  await port.open({ baudRate });
   try {
     const writer = port.writable!.getWriter();
     try {
@@ -78,5 +78,5 @@ export function printBrowserTest(): string {
 
   if (doc.readyState === 'complete') setTimeout(run, 60);
   else frame.onload = () => setTimeout(run, 60);
-  return 'print() called';
+  return 'print scheduled (check the paper)';
 }

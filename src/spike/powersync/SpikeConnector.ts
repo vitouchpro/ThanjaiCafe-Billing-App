@@ -17,6 +17,13 @@ const FATAL = [/^22...$/, /^23...$/, /^42501$/];
 export class SpikeConnector implements PowerSyncBackendConnector {
   readonly client: SupabaseClient;
 
+  /** Surfaced in the spike page so a rejected or failing upload is never silent. */
+  lastUploadError: {
+    at: string; table: string; op: string; code: string; message: string; discarded: boolean;
+  } | null = null;
+  discardedTransactions = 0;
+  lastUploadOkAt: string | null = null;
+
   constructor() {
     this.client = createClient(
       import.meta.env.VITE_SUPABASE_URL,
@@ -44,8 +51,10 @@ export class SpikeConnector implements PowerSyncBackendConnector {
     const transaction = await database.getNextCrudTransaction();
     if (!transaction) return;
 
+    let current = { table: 'unknown', op: 'unknown' };
     try {
       for (const op of transaction.crud) {
+        current = { table: op.table, op: String(op.op) };
         const table = this.client.from(op.table);
         let result;
         if (op.op === UpdateType.PUT) {
@@ -61,9 +70,18 @@ export class SpikeConnector implements PowerSyncBackendConnector {
         if (result.error) throw result.error;
       }
       await transaction.complete();
+      this.lastUploadOkAt = new Date().toISOString();
     } catch (ex) {
-      const code = (ex as { code?: unknown }).code;
-      if (typeof code === 'string' && FATAL.some((re) => re.test(code))) {
+      const rawCode = (ex as { code?: unknown }).code;
+      const code = typeof rawCode === 'string' ? rawCode : 'unknown';
+      const rawMessage = (ex as { message?: unknown }).message;
+      const message = typeof rawMessage === 'string' ? rawMessage : String(ex);
+      const fatal = typeof rawCode === 'string' && FATAL.some((re) => re.test(rawCode));
+      this.lastUploadError = {
+        at: new Date().toISOString(), table: current.table, op: current.op, code, message, discarded: fatal,
+      };
+      if (fatal) {
+        this.discardedTransactions++;
         console.error('Upload rejected, discarding transaction:', ex);
         await transaction.complete();
       } else {
