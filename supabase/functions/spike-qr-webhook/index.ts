@@ -14,11 +14,16 @@ Deno.serve(async (req) => {
   let body: unknown;
   try { body = JSON.parse(raw); } catch { body = { unparsable: raw.slice(0, 500) }; }
 
-  await admin.from('spike_webhook_log').insert({
+  const { error } = await admin.from('spike_webhook_log').insert({
     event_id: req.headers.get('x-razorpay-event-id'),
     signature_valid: valid,
     body,
   });
+
+  if (error) {
+    console.error('spike-qr-webhook: could not log', error);
+    return new Response('log failed', { status: 500 });
+  }
 
   return new Response(valid ? 'ok' : 'invalid signature', { status: valid ? 200 : 401 });
 });

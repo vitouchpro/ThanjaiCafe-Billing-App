@@ -1,14 +1,29 @@
 /* Creates a single-use, fixed-amount UPI QR for one bill, using Razorpay's
-   QR Codes API (POST /v1/payments/qr_codes). SPIKE ONLY: no caller auth. */
+   QR Codes API (POST /v1/payments/qr_codes).
+   SPIKE ONLY: deploy to the spike project with Razorpay TEST keys only, and deploy WITHOUT --no-verify-jwt
+   so the default JWT check applies.
+*/
 
 const headers = { 'Content-Type': 'application/json' };
 
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return new Response('POST only', { status: 405 });
 
-  const { billId, amountPaise } = await req.json() as { billId?: string; amountPaise?: number };
-  if (!billId || !Number.isInteger(amountPaise) || (amountPaise as number) < 100) {
-    return new Response(JSON.stringify({ error: 'billId and amountPaise (>= 100) are required' }), { status: 400, headers });
+  let billId: unknown;
+  let amountPaise: unknown;
+  try {
+    const body = await req.json();
+    billId = body.billId;
+    amountPaise = body.amountPaise;
+  } catch {
+    return new Response(JSON.stringify({ error: 'invalid JSON body' }), { status: 400, headers });
+  }
+
+  if (typeof billId !== 'string' || billId.length === 0 || billId.length > 64) {
+    return new Response(JSON.stringify({ error: 'billId must be a non-empty string, max 64 chars' }), { status: 400, headers });
+  }
+  if (!Number.isInteger(amountPaise) || (amountPaise as number) < 100 || (amountPaise as number) > 100000) {
+    return new Response(JSON.stringify({ error: 'amountPaise must be an integer between 100 and 100000 paise (Rs 1 to Rs 1000)' }), { status: 400, headers });
   }
 
   const keyId = Deno.env.get('RAZORPAY_KEY_ID')!;

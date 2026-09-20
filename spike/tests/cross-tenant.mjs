@@ -64,11 +64,70 @@ check('a bill cannot be deleted', rows.data?.length === 1, r.error?.code ?? 'no 
 
 // 5. Reads are scoped to the shop.
 const seenByB = await clientB1.from('bills').select('id').eq('id', own.id);
-check('another shop cannot read the bill', (seenByB.data ?? []).length === 0);
+check('another shop cannot read the bill', (seenByB.data ?? []).length === 0 && !seenByB.error);
 const shopsSeen = await clientB1.from('shops').select('id');
 check('a device sees only its own shop', shopsSeen.data?.length === 1 && shopsSeen.data[0].id === b1.shopId);
 
-// 6. The JWT carries the claims the policies rely on.
+// 6. bill_lines: test the new policy requiring bill to belong to caller's shop.
+// First, shop B inserts its own bill and one line for it.
+const billB = bill(b1);
+r = await clientB1.from('bills').insert(billB);
+check('shop B inserts its own bill', !r.error, r.error?.message);
+const lineB = {
+  id: randomUUID(), bill_id: billB.id, shop_id: b1.shopId, product_id: randomUUID(),
+  name: 'Test Product', qty: 1, unit: 'pcs', unit_price_paise: 1000, line_total_paise: 1000,
+};
+r = await clientB1.from('bill_lines').insert(lineB);
+check('shop B inserts a line for its own bill', !r.error, r.error?.message);
+
+// Now shop A tries to violate the policy.
+const lineABadBillB = { ...lineB, id: randomUUID(), shop_id: a1.shopId };
+r = await clientA1.from('bill_lines').insert(lineABadBillB);
+check('cannot insert a line for another shop\'s bill', r.error?.code === '42501', r.error?.code);
+
+const lineABadShopB = { ...lineB, id: randomUUID(), shop_id: b1.shopId, bill_id: own.id };
+r = await clientA1.from('bill_lines').insert(lineABadShopB);
+check('cannot insert a line with wrong shop_id even if bill is owned', r.error?.code === '42501', r.error?.code);
+
+// Shop A inserts a valid line for its own bill.
+const lineAOwn = {
+  id: randomUUID(), bill_id: own.id, shop_id: a1.shopId, product_id: randomUUID(),
+  name: 'Test Product', qty: 1, unit: 'pcs', unit_price_paise: 1000, line_total_paise: 1000,
+};
+r = await clientA1.from('bill_lines').insert(lineAOwn);
+check('shop A inserts a valid line for its own bill', !r.error, r.error?.message);
+
+// Shop A cannot see shop B's line.
+const seenLineByA = await clientA1.from('bill_lines').select('id').eq('id', lineB.id);
+check('shop A cannot read shop B\'s line', (seenLineByA.data ?? []).length === 0);
+
+// 7. products: test read scope, insert, and update restrictions.
+const productsA = await clientA1.from('products').select('shop_id');
+check('shop A selects >0 products and all have shop_id = A',
+  (productsA.data ?? []).length > 0 && (productsA.data ?? []).every(p => p.shop_id === a1.shopId));
+
+r = await clientA1.from('products').insert({
+  id: randomUUID(), shop_id: b1.shopId, name: 'Test', unit: 'pcs', price_paise: 1000,
+});
+check('cannot insert a product for another shop', r.error?.code === '42501', r.error?.code);
+
+// Get a product from shop B via clientB1, then try to update it via clientA1.
+const productsB = await clientB1.from('products').select('id, name');
+if ((productsB.data ?? []).length > 0) {
+  const productBId = productsB.data[0].id;
+  const originalName = productsB.data[0].name;
+  r = await clientA1.from('products').update({ name: 'Hacked' }).eq('id', productBId);
+  const productBAfter = await clientB1.from('products').select('name').eq('id', productBId);
+  check('cannot update another shop\'s product',
+    productBAfter.data?.[0]?.name === originalName && r.error?.code === '42501');
+}
+
+// 8. devices: test read scope.
+const devicesA = await clientA1.from('devices').select('code');
+check('shop A sees exactly its two devices (T1, T2)',
+  (devicesA.data ?? []).length === 2 && (devicesA.data ?? []).map(d => d.code).sort().join(',') === 'T1,T2');
+
+// 9. The JWT carries the claims the policies rely on.
 const { data: { session } } = await clientA1.auth.getSession();
 const claims = JSON.parse(Buffer.from(session.access_token.split('.')[1], 'base64url').toString());
 check('token carries shop_id and device_id', claims.shop_id === a1.shopId && claims.device_id === a1.deviceId);

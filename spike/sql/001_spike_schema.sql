@@ -97,13 +97,24 @@ create policy bills_insert on public.bills for insert to authenticated
 
 create policy bill_lines_read on public.bill_lines for select to authenticated
   using (shop_id = ((select auth.jwt()) ->> 'shop_id')::uuid);
+-- Ensure a line is attached to a bill of the caller's shop; stops cross-shop bill-line attachment when PowerSync uploads bills before lines in one transaction.
 create policy bill_lines_insert on public.bill_lines for insert to authenticated
-  with check (shop_id = ((select auth.jwt()) ->> 'shop_id')::uuid);
+  with check (
+    shop_id = ((select auth.jwt()) ->> 'shop_id')::uuid
+    and exists (
+      select 1 from public.bills b
+      where b.id = bill_lines.bill_id
+        and b.shop_id = ((select auth.jwt()) ->> 'shop_id')::uuid
+    )
+  );
 
 -- Explicit grants (Data API exposure is opt-in from 30 Oct 2026).
 grant select on public.shops, public.devices to authenticated;
 grant select, insert, update on public.products to authenticated;
 grant select, insert on public.bills, public.bill_lines to authenticated;
+
+grant usage on schema public to supabase_auth_admin;
+grant select, insert, update, delete on public.shops, public.devices, public.products, public.bills, public.bill_lines to service_role;
 
 -- Custom access token hook: adds shop_id and device_id from the devices table,
 -- never from anything the user can edit.

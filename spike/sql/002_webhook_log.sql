@@ -7,3 +7,5 @@ create table public.spike_webhook_log (
 );
 alter table public.spike_webhook_log enable row level security;
 -- No policies: only the service role (edge functions) can read or write it.
+-- Explicit grant for edge functions to log webhooks.
+grant select, insert on public.spike_webhook_log to service_role;
