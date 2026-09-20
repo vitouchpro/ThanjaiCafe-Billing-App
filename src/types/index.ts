@@ -175,6 +175,8 @@ export interface ReceiptSettings {
   size: ReceiptSize;
   printerName: string;
   autoPrint: boolean;
+  /** Print a KOT automatically when a paid order reaches the kitchen screen. */
+  autoPrintKot?: boolean;
   printDuplicate: boolean;
 }
 

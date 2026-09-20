@@ -43,8 +43,10 @@ function playChime(): void {
   }
 }
 
-export function useOrderAlerts() {
-  const { orders } = useOrderIntake(true);
+/** `createBills` defaults to true: the one billing-enabled instance is
+    OrderAlertHost. Callers that only count (the nav badge) pass false. */
+export function useOrderAlerts(options: { createBills?: boolean } = {}) {
+  const { orders } = useOrderIntake(true, { createBills: options.createBills ?? true });
   const soundOn = useAppStore((s) => s.settings.notifications.onlineOrderAlert);
 
   const previous = useRef<CloudOrder[] | null>(null);

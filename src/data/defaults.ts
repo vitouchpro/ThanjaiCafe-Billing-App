@@ -23,7 +23,7 @@ export const DEFAULT_SETTINGS: Settings = {
     showCustomerPhone: false,
     footerMessage: 'Thank you for visiting us!',
   },
-  receipt: { size: '80mm', printerName: '', autoPrint: false, printDuplicate: false },
+  receipt: { size: '80mm', printerName: '', autoPrint: false, autoPrintKot: false, printDuplicate: false },
   billing: {
     enabledPayments: ['cash', 'upi', 'card'],
     defaultTaxRate: 5,
