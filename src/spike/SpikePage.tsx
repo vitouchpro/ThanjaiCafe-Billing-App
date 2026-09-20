@@ -5,6 +5,7 @@ import { connector, db } from './powersync/db';
 import { createBill } from './createBill';
 import { deviceClaims, type DeviceClaims } from './jwt';
 import { PerfPanel } from './PerfPanel';
+import { PrintPanel } from './PrintPanel';
 
 function StoragePanel() {
   const [info, setInfo] = useState('');
@@ -129,6 +130,7 @@ function Panel() {
         <ul>{bills.data.map((b) => <li key={b.id}>{b.invoice_no} - {b.total_paise / 100} - {b.created_at}</li>)}</ul>
       </section>
       <PerfPanel ctx={claims && codeRow.data[0]?.code ? { shopId: claims.shopId, deviceId: claims.deviceId, deviceCode: codeRow.data[0].code } : null} />
+      <PrintPanel />
       <StoragePanel />
     </div>
   );
