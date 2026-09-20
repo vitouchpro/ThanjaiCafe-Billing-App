@@ -1,0 +1,12 @@
+config:
+  edition: 3
+
+streams:
+  shop_data:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM shops WHERE id = auth.parameter('shop_id')
+      - SELECT * FROM devices WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM products WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM bills WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM bill_lines WHERE shop_id = auth.parameter('shop_id')
