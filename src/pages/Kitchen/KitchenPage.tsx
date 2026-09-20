@@ -34,7 +34,8 @@ function nextStep(status: OrderStatus): { to: OrderStatus; label: string } | nul
 
 export function KitchenPage() {
   const businessName = useAppStore((s) => s.settings.business.name);
-  const { orders, error } = useOrderIntake(true);
+  // The kitchen displays orders; only a till bills them (see ordersToClaim).
+  const { orders, error } = useOrderIntake(true, { createBills: false });
   const [now, setNow] = useState(() => Date.now());
 
   // Ticks the "waiting for" clocks and the 15-minute warning treatment.
