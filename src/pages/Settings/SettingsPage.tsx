@@ -369,6 +369,12 @@ function ReceiptSection() {
           onChange={(v) => set('autoPrint', v)}
         />
         <ToggleRow
+          label="Auto print kitchen tickets"
+          description="Prints a KOT as soon as a paid QR order reaches the kitchen screen. For a print with no dialog, open the kitchen browser with the --kiosk-printing flag."
+          checked={form.autoPrintKot ?? false}
+          onChange={(v) => set('autoPrintKot', v)}
+        />
+        <ToggleRow
           label="Print duplicate copy"
           description="Prints a second copy marked DUPLICATE."
           checked={form.printDuplicate}
