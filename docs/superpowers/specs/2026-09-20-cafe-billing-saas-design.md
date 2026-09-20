@@ -1,7 +1,7 @@
 # Cafe Billing SaaS — Multi-Tenant, Offline-First Design
 
 **Date:** 2026-09-20
-**Status:** Design approved in conversation; revised 2026-09-20 to add the mall-style QR self-ordering requirement (section 9); awaiting written-spec review
+**Status:** Design approved in conversation; revised 2026-09-20 to add mall-style QR self-ordering (section 9) and the cafe/bakery operations review (sections 10–13, appendix A); awaiting written-spec review
 **Scope:** Turn `thangai-pos` (single-cafe, single-till) into a subscription product sold to many cafes, with several billing devices per cafe syncing live, on Supabase.
 
 ---
@@ -16,12 +16,16 @@
 5. Runs on Supabase's free plan for development and the pilot, with an explicit trigger for moving to paid plans.
 6. Client and server stay fast at realistic volume (about 200 bills/day/shop, years of history).
 7. Mall-style self-service: a diner scans a QR for that cafe, orders and pays on their own phone, the kitchen gets the KOT the moment payment succeeds (no waiting for a waiter or cashier), and the diner is billed and notified without staff involvement (section 9).
+8. Fit the real operations of cafes, bakeries and related food shops: table service, weight-based and advance/custom orders, stock, GST tax regimes, cash control, customers and credit (sections 10–11).
+9. Payment integrity: no reliance on a customer's screenshot or a cashier's word that UPI arrived (section 10.3).
+10. Growth features: aggregator/ONDC and WhatsApp channels, AI assistance, and a legal/trust pack sufficient to charge customers (sections 12–13).
 
 ### Non-goals (this spec)
 - A single QR listing many stalls in a mall (marketplace with split settlement). This spec covers one QR set per cafe/counter/table. The account → shop hierarchy does not preclude a later marketplace layer.
 - Plan tiers and per-shop pricing (separate decision).
-- Native wrappers (Capacitor/Tauri), direct ESC/POS printing, and a LAN hub for cross-device sync during internet outages. Planned as later phases; the data model does not preclude them.
-- Inventory, recipes, purchases (already deferred by the current product plan §29).
+- Native wrappers (Capacitor/Tauri) and a LAN hub for cross-device sync during internet outages. Planned as later phases; the data model does not preclude them. (Direct ESC/POS printing from Chrome/Edge via web APIs is in scope, section 11.7.)
+- Recipes, ingredient-level costing and purchasing/supplier management. Stock-lite (finished-goods counts, batch/expiry, wastage) **is** in scope (section 11.3); the `recipeId` hook stays reserved.
+- Building every module before the first beta. The schema for all in-scope modules is designed up front (Phase 1), but features ship in waves (section 16).
 
 ### Assumptions
 - India-first: INR, GST, UPI, Razorpay.
@@ -75,6 +79,11 @@
 | QR order billing | Created **server-side** at payment confirmation, from a server-allocated online invoice series | Removes the dependency on a till being open and the burned-invoice-number problem |
 | Kitchen | Kitchen display (KDS) per station is the primary path; auto-print is optional | Browsers cannot silently print to a network thermal printer, so a screen needs no printer or bridge |
 | Diner ready notice | Live status page and token board free; WhatsApp/SMS optional paid add-ons | Push is unreliable for diners on iOS; messaging has a per-message cost |
+| Tax | Data-driven: shop tax regime, HSN/SAC, order-type rules, effective dates, per-line rule snapshot | Rates changed recently, and dine-in versus takeaway can change the treatment; hard-coded rates would need a release for each change |
+| Refunds and amendments | Credit note with its own series, and cancel-and-reissue for corrections | Post-invoice adjustments are a compliance matter (CA to confirm) |
+| Walk-in UPI | Verified by gateway webhook (per-bill dynamic QR or link); manual attestation is a flagged fallback | Fake payment screenshots are a documented scam; the cashier's word is not proof |
+| Manager authority | Signed approval tokens from a manager's own device; manager credentials never on counters | A 4-digit PIN hash on a shared tablet is offline-brute-forceable |
+| Scope shape | Schema for every module up front, features shipped in waves | Schema changes are the expensive ones to retrofit; features are not |
 
 ---
 
@@ -85,13 +94,20 @@
 **Who authenticates how**
 - **Owner / manager:** real Supabase Auth account (email or Google). Dashboard, device enrolment, billing.
 - **Device:** enrolled once by the owner via an edge function that creates a device identity. Its JWT carries `shop_id`, `device_id`, `role=device` in `app_metadata` (never `user_metadata`, which users can edit), injected by a custom access-token hook. Sync and RLS use this token.
-- **Cashier / kitchen:** select themselves with a PIN on an enrolled device. PINs are stored as salted hashes, synced with the shop's data, verified locally so login works offline, with lockout and backoff. Every write records `staff_id` and `device_id`.
+- **Cashier / kitchen:** select themselves with a PIN on an enrolled device. Cashier and kitchen PINs are stored as salted slow hashes, synced with the shop's data, verified locally so login works offline, with lockout and backoff. A short PIN is only a convenience gate, because anyone who can read the local database can brute-force a 4-digit hash offline, so **owner and manager credentials are never synced to counter devices** (section 4.1). Every write records `staff_id` and `device_id`.
 
 **Enforcement**
 - Tenant isolation is a hard guarantee: RLS on `shop_id` from the JWT claim, indexed, using `(select auth.jwt())` so Postgres caches it; no per-row subqueries.
 - Role permissions (refund, delete, price edit) are checked in the app and again in the upload path using the synced staff/permission rows.
 - Revocation: issued tokens stay valid until expiry, so keep access tokens short-lived and have the upload RPC re-check `devices.revoked_at`.
 - The service-role key is never in a client. `VITE_PUBLISH_TOKEN` is removed.
+
+### 4.1 Memberships, approvals and PIN policy
+- **Memberships.** `memberships(user, shop, role, active)` lets one person hold different roles in different shops (a manager covering two outlets). Roles and permissions are evaluated per shop.
+- **Owner security.** Owner accounts require TOTP two-factor authentication. Enrolling or revoking a device, changing plans, and exporting all data require a recent MFA check.
+- **Elevated actions need an approval.** Refund, void after the KOT was sent, discount above the shop limit, price override, and a no-sale drawer open each require an **approval token**. It is signed with a key held on a manager's own enrolled device, after the manager unlocks that device, and it names the action, the bill and a short expiry (for example 2 minutes) plus a nonce. The counter device verifies it against the managers' public keys, which are the only manager material it holds, and stores the token with the resulting event. Offline hand-off is by QR scan between the two devices. If no manager is reachable, low-risk actions queue as "pending approval" and never block a sale.
+- **Deactivation lag.** A device that is offline keeps its last staff list, so bills made by a deactivated person after the deactivation time are flagged for review once synced.
+- **Two rule sets, one behaviour.** PowerSync Sync Streams decide what a device may read, and Postgres RLS decides what it may write. An automated test asserts both agree, for every table, so they cannot drift.
 
 ---
 
@@ -100,13 +116,15 @@
 ### Conventions
 - IDs: UUIDv7 generated on the device, so offline creation needs no server.
 - Money: integer paise (`bigint`) end to end, matching `calc.ts`; removes today's float / `numeric(10,2)` mismatch.
+- Quantities: `numeric(12,3)` with a unit (pcs, kg, g, plate…), replacing today's integer `qty`, so weight-priced bakery and sweets items are exact. Line amounts are still rounded to whole paise.
+- Tax is data, not code: rates, HSN/SAC codes and order-type rules are effective-dated rows, and each bill line snapshots the rule it used (section 10.1).
 - Every bill carries `business_date`, computed in the shop's timezone with a configurable day cut-over.
 - Every row: `shop_id`, `device_id`, `staff_id`, timestamps; soft delete via `deleted_at`.
 
 ### Two data classes, two conflict rules
 | Class | Tables | Rule |
 |---|---|---|
-| Transactions (append-only) | `bills`, `bill_lines`, `bill_payments`, `bill_events`, `day_closes`, `audit_log` | Never edited after finalizing. Refund/cancel = new `bill_events` rows. Uploads are `insert … on conflict do nothing`. No UPDATE/DELETE policies; a trigger also blocks updates. |
+| Transactions (append-only) | `bills`, `bill_lines`, `bill_payments`, `bill_events`, `credit_notes`, `tab_lines`, `advance_payments`, `stock_movements`, `cash_movements`, `loyalty_ledger`, `credit_ledger`, `day_closes`, `audit_log` | Never edited after finalizing. Refund/cancel = new `bill_events` rows plus a credit note where tax applies (section 10.2). Uploads are `insert … on conflict do nothing`. No UPDATE/DELETE policies; a trigger also blocks updates. |
 | Config (mutable) | `products`, `categories`, `staff`, `settings` | Server wins per row. A `rev` column rejects a stale edit with a visible message. Only owner/manager write. |
 
 Consequences for the current app: `deleteBill` is removed (void, never delete); `refundBill` appends an event instead of mutating; held carts stay device-local drafts until finalized.
@@ -122,6 +140,14 @@ Per-device series `{device}/{fy}/{seq}`, e.g. `T1/2627/000123` (14 chars). Uniqu
 - Reporting/ops: `shop_daily_stats`, `audit_log`, `sync_errors`
 
 `order_events` is append-only (about five rows per order, roughly 100 KB/day for a 200-order shop, negligible against the free quota) and feeds SLA and ETA analytics.
+
+**Tables added by the operations review (sections 10–13)** — all created in Phase 1 (schema-first) even though features ship in waves:
+- Identity and tax: `memberships`, `tax_profiles`, `tax_rules`, `credit_notes`, `approvals`
+- Table service: `tables`, `tabs`, `tab_lines`
+- Bakery and stock: `advance_orders`, `advance_payments`, `stock_items`, `stock_batches`, `stock_movements`, `wastage_entries`
+- Pricing and cash: `charges`, `promotions`, `price_lists`, `availability_schedules`, `shifts`, `cash_movements`, `exceptions`
+- Customers: `customers`, `loyalty_ledger`, `credit_accounts`, `credit_ledger`
+- Channels and messaging: `channels`, `channel_orders`, `message_templates`, `message_log`, `consents`
 
 Every migration includes explicit `GRANT`s (Supabase stops auto-exposing new `public` tables to the Data API from 30 Oct 2026) and RLS.
 
@@ -153,6 +179,7 @@ Every migration includes explicit `GRANT`s (Supabase stops auto-exposing new `pu
 - After grace: block new device enrolment and QR ordering; **the till keeps billing offline until the lease ends**.
 - Lease expired: read-only with data export allowed.
 - Downgrade over limit: flag oldest devices; never delete data.
+- Uploads of bills, events and payments that were already created on a device are **never blocked** by a lapsed subscription. A cafe must not lose sales it already made.
 - Cancellation: read-only export window, then archive.
 
 ---
@@ -163,6 +190,8 @@ Every migration includes explicit `GRANT`s (Supabase stops auto-exposing new `pu
 - `backup-bills` is replaced by PowerSync upload; `publish-menu` becomes an RLS-guarded upsert from back-office devices. Remaining edge functions: `create-order`, `verify-payment` (per-shop; now also creates the bill and fires the KOT, section 9.3), `refund-order`, `enrol-device`, `subscription-webhook`. Diner order status is a rate-limited, cached RPC that returns minimal fields (token, status, items) and never personal data.
 - QR `t=` links carry an HMAC-signed table token; pending orders are rate-limited per table and capped per shop.
 - Design principle: **the server accepts and flags, and never rejects a completed sale.** A bill is refused only for tenant mismatch or a revoked device; anything else (over-limit discount, late bill for a closed day) is stored and raised for owner review.
+- **Noisy-neighbour control** on the shared database: per-shop request rate limits, statement timeouts, bulk imports queued and chunked, and heavy reports served from `shop_daily_stats` rollups only.
+- **Per-shop recovery.** Pooled tenancy means a whole-database backup cannot restore one cafe. Soft deletes, the audit log, a self-serve per-shop export and an operator-run per-shop restore tool cover "we deleted everything". Point-in-time recovery is added at go-live.
 
 ---
 
@@ -212,7 +241,7 @@ The per-shop `verify-payment` handler, in one transaction: promotes the draft to
 ### 9.4 Kitchen
 - **Stations.** A `category_stations` mapping routes items to stations (for example kitchen, beverages/bar, bakery). Each station gets its own KOT.
 - **KDS first.** A full-screen kitchen display for enrolled `kitchen` devices: audible alert on arrival, per-order elapsed timer, tap to bump to Preparing or Ready. It needs no printer.
-- **Printing is optional and has three tiers.** (1) No printing, KDS only. (2) Auto-print on a kitchen Windows PC or tablet running Chrome/Edge with its kiosk-printing flag, which skips the print dialog (**verify in the spike**), reusing the existing `kot.ts` template. (3) A native print bridge (Tauri/Capacitor, ESC/POS to a LAN printer) as a later phase. Cloud print services such as [PrintNode](https://www.printnode.com/en) also work but are paid and need a local agent, so they are not planned for v1.
+- **Printing is optional and has three tiers.** (1) No printing, KDS only. (2) Dialog-less printing through the shared `PrinterPort` (section 11.7): **direct ESC/POS over WebUSB, Web Bluetooth or Web Serial** on Chrome/Edge (Android and Windows; not iOS), or the browser's kiosk-printing flag. Both reuse the existing `kot.ts` template and need verification in the spike. (3) A native print bridge (Tauri/Capacitor, ESC/POS to a LAN printer) as a later phase. Cloud print services such as [PrintNode](https://www.printnode.com/en) also work but are paid and need a local agent, so they are not planned for v1.
 - **Acknowledgement.** The device that displays a ticket writes `ACKNOWLEDGED`. Two kitchen devices are safe: the acknowledgement is idempotent and the first bump wins.
 - **Kitchen offline while the diner pays.** The diner pays over mobile data, so the order can be `PAID` while the cafe's internet is down and no kitchen device sees it. The diner's status reads "Paid, waiting for the kitchen to confirm". After a timeout (default 3 minutes) the order is flagged to the owner, with an optional per-shop auto-refund (off by default).
 - **Load control.** A per-shop "busy" switch pauses new online orders, an optional cap limits open orders, and sold-out items stop being orderable within seconds. ETA is computed from open orders per station and average prep time from `order_events`.
@@ -250,7 +279,116 @@ Diners pay through the cafe's own Razorpay account. Razorpay's own pricing pages
 
 ---
 
-## 10. Edge-case catalogue
+## 10. Tax, compliance and payment integrity
+
+### 10.1 Data-driven tax
+- `tax_profiles` per shop: regime (regular, composition, unregistered), GSTIN, state, FSSAI licence number.
+- `tax_rules`: HSN/SAC code, applicable order types (dine-in, takeaway, delivery, any), rate, cess, `valid_from`/`valid_to`. Products reference an HSN/SAC and a tax class. Cafe and bakery presets ship as **editable defaults with a source date**, never as hard-coded rates.
+- Each bill line snapshots the rule used, the taxable value, and the CGST/SGST (intra-state) or IGST (inter-state B2B) amounts. Composition and unregistered shops issue a bill of supply with no tax lines. Tax-inclusive and exclusive pricing stay supported.
+- The **order type is set when items are added, but tax is computed at settlement**. If a diner switches from dine-in to takeaway, the bill is re-taxed, since the treatment can differ between restaurant service and goods.
+- Why this matters: sources report that cakes and pastries moved to 5% from 22 September 2025, that bread is nil-rated, that dine-in is restaurant service at 5% without input credit, and that a bakery selling only goods may use HSN rates or the composition scheme ([Masters India](https://www.mastersindia.co/blog/gst-on-bakery-products-cakes-pastries-biscuits/), [Busy](https://busy.in/gst-rates/bakery-products/)). **A CA must confirm the defaults before launch.**
+
+### 10.2 Credit notes and amendments
+Refunds and price reductions after an invoice produce a **credit note** in its own series (`C/{fy}/{seq}` per device, `WC/…` for online), linked to the original bill, plus the payment refund event. A correction (wrong payment mode, GSTIN added later, wrong item) is a cancel-with-credit-note and a reissued invoice carrying `amends_bill_id`. Nothing is edited in place. Time limits and formats follow the CA's advice.
+
+### 10.3 Verified UPI at the till
+Walk-in UPI is currently confirmed by the cashier tapping "paid". That is exactly what fake payment-screenshot scams exploit ([Razorpay](https://razorpay.com/learn/fake-payment-screenshot-scam/)); only a gateway callback, soundbox or your own bank credit is proof.
+- At the payment step the till asks a `create-till-payment` function (using the shop's own Razorpay keys) for a **per-bill dynamic QR or payment link**, shown on the cashier screen and any customer-facing display. The webhook writes a verified `bill_payments` row carrying the gateway id, and the till learns of it over the sync stream.
+- Three modes, recorded on the payment: `verified` (gateway), `manual` (cashier attests, for example from a soundbox, and must enter a reference; appears in the exception report), and `offline_unverified` (no internet, reconciled by the owner later).
+- Per-shop policy: require verified UPI above a set amount, or always.
+- Offline UPI can never be verified at the moment of sale. That is inherent, and the design makes it visible instead of hiding it.
+
+### 10.4 B2B invoices and identifiers
+A bill can carry a buyer name, GSTIN and address, with IGST when inter-state. The FSSAI licence number is printed on receipts and invoices (rule to be verified). Invoice and receipt language is selectable (English or Tamil).
+
+---
+
+## 11. Cafe and bakery operations
+
+### 11.1 Table service
+- `tables` (zone, seats) and `tabs`. A tab is a set of **append-only `tab_lines` events** (add, void, transfer, merge). Two waiters adding to one table offline merge by simple union, with no edit conflicts, and totals are derived.
+- Each fired line produces a **delta KOT**, so the kitchen sees only the new items. Voiding an item after firing requires an approval (section 4.1) and shows a cancelled line on the KOT.
+- Settlement creates the bill(s). **Split** by item, person or equal shares; **merge** and **transfer** tables as events.
+- A prepaid QR order for a table with an open tab stays a separate bill by default, with an optional merge.
+
+### 11.2 Bakery pack
+- **Weight and units.** Decimal quantities (section 5) and price per unit; weight captured from a connected scale (11.7) or typed. Barcode labels for loose and packed goods.
+- **Advance and custom orders.** `advance_orders` capture flavour, size or weight, cake message, reference photo, pickup/delivery date and time, discount and notes. `advance_payments` are append-only receipts in their own series. The balance is collected at pickup, and the final invoice consumes the advances (**tax timing on advances: CA to confirm**). Cancellation rules are per shop (forfeit or refund percentage).
+- **Batch and expiry.** Optional per product: batches with production date, MRP and expiry, first-expiry-first-out deduction, and alerts ahead of expiry so items can be pushed on offer.
+- **Production sheet.** A daily bake list built from advance orders plus per-item par levels.
+
+### 11.3 Stock-lite
+`stock_items` (finished goods; ingredients can come later), append-only `stock_movements` (sale, receipt, adjustment, wastage, production) with a reason, and derived on-hand. Opening and closing counts, low-stock alerts, and automatic **sold-out** at zero. QR limited-stock is decremented atomically on the server. Offline tills can drive stock negative, which is accepted and flagged, then reconciled at day end. Recipes and purchasing remain out of scope.
+
+### 11.4 Pricing and charges engine
+`charges` (service charge, packaging, delivery), tips (post-bill and untaxed), `promotions` (coupon codes, combos and bundles, buy-one-get-one, happy-hour windows, minimum order), `price_lists` per order type, channel or zone, and `availability_schedules` (breakfast menu). Everything evaluates in the **shared `calc.ts` on both client and server**, with the parity tests extended. Precedence is fixed and documented: item price → price list → promotion (default: best single promotion, configurable stacking) → manager-limited discount → charges → tax → round-off. Service charge is optional and shown on the bill as voluntary.
+
+### 11.5 Cash control and loss prevention
+`shifts` (per cashier per device, with opening float and a blind closing count), `cash_movements` (paid-in, paid-out, expenses, cash drops, each with a reason), and day close aggregating shifts. An **exceptions report** built from the append-only events lists: voids after payment, discounts above a threshold, refunds by staff, no-sale drawer opens, manual or unverified UPI, and bills by deactivated staff.
+
+### 11.6 Customers, loyalty and credit accounts
+- `customers` (phone unique per shop), attached to a bill optionally, with consent flags.
+- Loyalty is an append-only points ledger (earn and redeem) plus coupons.
+- **Credit accounts** ("khata") for regulars and offices: a credit limit, ledger, statements and ageing. A credit sale creates a normal bill with payment method `credit`, and later payments settle the account.
+- Privacy: collect only what is needed, log consent, and support deletion or anonymization on request while keeping tax records.
+
+### 11.7 Hardware
+A single **`PrinterPort`** interface with interchangeable back ends: (a) the browser print dialog (default and universal); (b) direct ESC/POS over WebUSB, Web Bluetooth or Web Serial on Chrome/Edge for Android and Windows (HTTPS and a user gesture required, works offline after permission is granted, not available on iOS) ([example](https://github.com/yunarmedia/YUPOS)); (c) kiosk-printing where the dialog is suppressed; (d) a native bridge later. On Windows a vendor driver may claim the printer and block WebUSB, so support is decided per printer model in the spike. The same port kicks the **cash drawer** through the printer and prints label templates for bakery items. Barcode scanners work as keyboard input and through the camera. Scales connect via Web Serial or HID adapters (model-specific, list decided in the spike). A **customer-facing display** shows the cart and the dynamic UPI QR. A supported-hardware matrix is published per device type.
+
+### 11.8 Reports and exports
+GST summaries by rate, HSN and order type; sales by item, category, hour, staff, channel and shift; stock and wastage; credit-account ageing; the exceptions report; an owner daily summary by email or WhatsApp. Exports as CSV and Excel, and an accounting export (Tally-compatible format to be verified).
+
+### 11.9 Fast onboarding
+A sign-up wizard: choose a business type preset (cafe, bakery, quick-service) that seeds categories, units, editable tax rules and a receipt template; **CSV/Excel menu import** with validation and a dry run; **AI photo-to-menu import**, where a photo of a printed menu is read by a model on the server and always shown to a human for review before anything is published (images are processed transiently, and never used to train anything); device enrolment; and a test bill. **Target: first real bill within 30 minutes of sign-up.**
+
+---
+
+## 12. Channels, growth and AI
+
+### 12.1 Order channels
+`channels` and `channel_orders` normalize external orders into the same server-side pipeline as QR orders (section 9.3): a bill on the `W` series, a KOT fired automatically, and `order_events` recorded. Channels: till, QR, phone, WhatsApp, and aggregators (Swiggy, Zomato, ONDC, magicpin). Menu and availability sync outward where a platform supports it, commissions are recorded as an expense line, and each channel can have its own price list. Sources say modern POS systems integrate directly with these platforms so orders land with an automatic KOT ([E-Cybertech](https://www.ecybertech.com/blog-restaurant-pos-india-2026-guide)). Each aggregator gets its own adapter spec, and the integration route (a partner or middleware versus direct API) is verified per platform.
+
+### 12.2 WhatsApp commerce and marketing
+Opt-in only, with consent logged. Template messages for order ready, receipt, loyalty and birthday; ordering through a WhatsApp Business catalogue that feeds the same order pipeline. It uses a WhatsApp Business provider, with per-message costs passed through in plan pricing ([cost comparison](https://richautomate.in/blog/whatsapp-business-api-vs-sms-cost-india-2026)).
+
+### 12.3 AI assistance
+- Photo-to-menu import (11.9).
+- **Demand forecasting and prep suggestions** from `order_events` and sales history: suggested bake or prep quantities by day and hour, and low-stock reorder hints.
+- **Voice phone-ordering**, later and heavier.
+- Guardrails: no customer personal data sent to models, human confirmation on anything that changes the menu, prices or stock, forecasts computed from server rollups, and a per-shop cost cap.
+
+---
+
+## 13. Legal, trust and non-functional requirements
+
+### 13.1 Legal and trust pack
+Terms of service, privacy policy, a data-processing agreement (the operator processes cafes' customer data), subscription refund and cancellation policy, acceptable-use policy, and an SLA statement (best effort until on paid infrastructure). Self-serve data export, account deletion with tax-record retention exceptions, consent logs, a breach-notification procedure, and a grievance contact for India's DPDP obligations. **Lawyer and CA review before charging anyone.**
+
+### 13.2 Non-functional targets (proposed; confirm after a device survey of real cafes)
+- **Billing hot path** on a baseline device (a low-end Android tablet, a Windows 10 PC with 4 GB RAM): add item under 100 ms, complete bill under 300 ms, first page of history under 200 ms, cold start under 3 seconds.
+- **Recovery:** RPO up to 24 hours (nightly dump during the pilot, then daily backups on Pro), tightening with point-in-time recovery as volume justifies; RTO up to 4 hours.
+- **Availability:** best effort during the pilot; a stated target once paid infrastructure and monitoring exist.
+- **Accessibility and language:** touch targets of at least 44 px, adequate contrast, English and Tamil UI, and a menu and receipt language chosen per shop.
+- **Security:** owner MFA, audit trail on all privileged actions, and an external security test before go-live.
+- A supported-device and browser matrix, decided from the device survey.
+
+### 13.3 Support and operability
+An operator console showing per-tenant and per-device status (last sync, pending count, app version), impersonation only with owner consent and a full audit log, feature flags per plan or shop, staged rollout using `min_client_version`, in-app announcements, error tracking (client errors to `sync_errors` or an external tool), and a public status page.
+
+### 13.4 Unit economics
+| Cost | Type | Note |
+|---|---|---|
+| Supabase Pro ($25) and PowerSync Pro ($49) | Fixed | About $74/month from go-live |
+| Domain, custom SMTP (the free auth email limit is 2 per hour), error monitoring | Fixed | Needed before the first external cafe |
+| Storage, egress, database growth | Variable per shop | Measured in the spike |
+| Razorpay fee on your own subscription (about 2% + GST, verify) | Variable | Comes out of plan revenue |
+| WhatsApp/SMS, AI calls | Variable | Passed through or capped per shop |
+
+Plan prices are set from this table (open item).
+
+---
+
+## 14. Edge-case catalogue
 
 | Area | Case | Handling |
 |---|---|---|
@@ -286,9 +424,31 @@ Diners pay through the cafe's own Razorpay account. Razorpay's own pricing pages
 | | Supabase paused/unreachable | Behaves as offline; alert the operator |
 | | Customer phone numbers | Consider India's DPDP Act: retention limit, deletion on request, export |
 
+### Combination scenarios
+Failures usually come from two features meeting. Each row is a required test case.
+
+| Combination | Required behaviour |
+|---|---|
+| Prepaid QR order for table T4 while a cashier's open tab exists on T4 | Separate bills by default with an optional merge; both KOTs show the table |
+| Split bill (verified UPI + cash), then a partial refund after day close | Refund apportioned across the payment methods and recorded as an event and credit note in the current day; a closed day is never reopened |
+| Happy hour ends while a cart is open, or a held bill is resumed next day | The price is locked when the item is added; held bills expire at day close and appear in a report |
+| A tax rule changes mid-day with held bills and open QR carts | Tax is computed at finalization by effective date; QR carts stay locked at `create-order` |
+| Custom cake with advance, discount at pickup, then cancellation | Advance-receipt ledger kept separate from the invoice; the final invoice consumes the advance; cancellation follows the shop's forfeit/refund rule (tax timing per CA) |
+| Dine-in switched to takeaway mid-order | Re-taxed at settlement using the order-type rule |
+| Weight item, scale reading offline, price per kg edited on another device | The line snapshots weight and unit price at sale; a later price edit never changes past bills |
+| Subscription lapses with unsynced offline bills and QR payments in flight | Uploads of existing records are never blocked; new QR orders are refused; in-flight payments complete |
+| A tablet dies holding unsynced bills | Devices report pending counts in a heartbeat; the owner is alerted when a device goes silent with pending items |
+| Two offline tills both sell the last slices of a cake | Stock is eventually consistent; negative stock is accepted and flagged; QR limited stock stays server-atomic |
+| Refund of a QR order when the cafe's Razorpay balance is short, or a chargeback arrives | The refund is queued with an alert; dispute events flag the bill and appear on the owner dashboard |
+| A staff member is deactivated while a device is offline | Bills after the deactivation time are flagged for review after sync |
+| A corporate customer gives a GSTIN after payment | Cancel with credit note and reissue a B2B invoice within the allowed window (CA to confirm) |
+| Verified UPI requested while the till is offline | The payment records as `offline_unverified` and enters the owner's reconciliation list |
+| Approval needed offline and no manager present | Low-risk actions queue as pending approval; high-risk actions are blocked; the sale itself is never blocked |
+| Financial year rolls over with an advance order created on 31 March and delivered in April | The final invoice takes the new financial year's series; the advance receipt keeps the old one |
+
 ---
 
-## 11. Operations
+## 15. Operations
 
 **Free-tier limits (official pages, September 2026):** Supabase Free — 500 MB database (shared CPU, 500 MB RAM), 1 GB storage, 5 GB egress, 500k edge invocations, 200 concurrent Realtime connections, 2 active projects, **no automatic backups**, paused after 1 week of low activity, 1-day log retention. PowerSync Free — 50 concurrent clients, 2 GB synced/month, 500 MB hosted, deactivated after a week of inactivity.
 
@@ -302,7 +462,7 @@ Diners pay through the cafe's own Razorpay account. Razorpay's own pricing pages
 
 ---
 
-## 12. Rollout
+## 16. Rollout
 
 ### Phase 0 — harden the current app (no restructuring)
 1. Rotate the exposed live Razorpay secret.
@@ -322,21 +482,33 @@ Passes only if tests 1–5 all hold; failure of any of 1–4 falls back to custo
 | 4 | Two devices create bills offline, then reconnect | No duplicates or losses; per-device series unique |
 | 5 | 100k seeded bills on a low-end Android | Proposed: first history page < 200 ms, today's dashboard < 300 ms; measure real bytes per bill vs 1.5 KB |
 | 6 | Kitchen printing: Chrome/Edge kiosk-printing on a Windows kitchen PC, and Android Chrome | Prints a KOT with no dialog, or we fall back to KDS-only for that platform |
-| 7 | Record only | WAL growth on an idle instance, `pg_cron` on free, UPI AutoPay recurring limit |
+| 7 | Direct ESC/POS over WebUSB, Web Bluetooth and Web Serial on Windows and Android with the printers cafes commonly own, including cash-drawer kick | Prints and kicks the drawer for the tested models, or that model is marked "browser print only" |
+| 8 | Verified UPI: per-bill dynamic QR or link with webhook confirmation on a test Razorpay account | Confirmation reaches the till within a few seconds online; offline records `offline_unverified` |
+| 9 | Record only | WAL growth on an idle instance, `pg_cron` on free, UPI AutoPay recurring limit |
 
 ### Phases (each ends at a gate the owner approves)
 | Phase | Scope | Size | Gate |
 |---|---|---|---|
-| 1. Foundation | Tenant schema, RLS, access-token hook, device enrolment, PIN hashing, migrations and CI, cross-tenant DB tests | M | Isolation tests pass |
-| 2. Client data layer | Repository seam, PowerSync swap, SQL reports, Storage images, invoice series, onboarding wizard, Thanjai importer | L | 207 tests + e2e pass; Thanjai runs on it as the pilot with nightly backups |
-| 3. Multi-device and QR self-ordering | Second till live, per-device day close; **QR self-ordering (section 9):** `qr_points` (table/counter/takeaway), per-shop menu with variants and modifiers, bring-your-own Razorpay keys, server-side online billing on the `W` series, stations and KDS with acknowledgement, auto-fired KOT (optional kiosk-print), token board, refund flow, busy/sold-out controls, reconciliation queue | **L** | Two-device chaos tests pass; a mall-peak load test (for example 30 orders in a minute) meets the latency targets; a paid order with no till open still gets a bill and a KOT |
-| 4. SaaS layer | Plans, Razorpay Subscriptions, entitlements, leases, operator admin console, owner remote dashboard | M–L | Webhook replay and out-of-order tests pass |
-| 5. Go-live | Upgrade to paid tiers, load test, restore drill, GST and DPDP review, beta with 2–3 cafes | M | Restore drill succeeds; beta cafes live |
-| Later | Capacitor/Tauri wrappers, native ESC/POS print bridge, WhatsApp/SMS ready-notifications as a paid add-on, LAN hub, multi-stall mall QR with split settlement | — | Only if beta shows the need |
+| 1. Foundation | Tenant schema, RLS, access-token hook, device enrolment, memberships, owner MFA, approval tokens, PIN policy, migrations and CI, cross-tenant DB tests **plus the schema for every in-scope module** (tax rules, credit notes, decimal quantities, tabs, stock, advances, channels; tables created early, features later) and the Sync Streams vs RLS agreement test | L | Isolation and agreement tests pass |
+| 2. Client data layer | Repository seam, PowerSync swap, SQL reports, Storage images, invoice series, onboarding wizard, Thanjai importer; the data-driven tax engine and decimal quantities in `calc.ts` with extended parity tests; credit notes; `PrinterPort` with the browser-print back end | L | 207 tests + e2e pass; Thanjai runs on it as the pilot with nightly backups |
+| 3. Multi-device and QR self-ordering | Second till live, per-device day close; **QR self-ordering (section 9):** `qr_points` (table/counter/takeaway), per-shop menu with variants and modifiers, bring-your-own Razorpay keys, **verified UPI at the till (section 10.3)**, server-side online billing on the `W` series, stations and KDS with acknowledgement, auto-fired KOT (optional kiosk-print), token board, refund flow, busy/sold-out controls, reconciliation queue | **L** | Two-device chaos tests pass; a mall-peak load test (for example 30 orders in a minute) meets the latency targets; a paid order with no till open still gets a bill and a KOT |
+| 4. SaaS layer | Plans, Razorpay Subscriptions, entitlements, leases, operator admin console with consent-based impersonation and feature flags, owner remote dashboard, **legal and trust pack (13.1), unit-economics and plan pricing (13.4)** | M–L | Webhook replay and out-of-order tests pass; legal pack reviewed |
+| 5. Go-live | Upgrade to paid tiers, load test, restore drill, per-shop restore tool, external security test, GST/CA and DPDP review, beta with 2–3 cafes | M | Restore drill succeeds; beta cafes live |
+
+### Post-beta waves
+The schema for all of these exists from Phase 1, so each wave adds features and never migrations of historical bills. The order below is the default. **Which wave the beta needs first depends on whether the beta cafes are cafes or bakeries (open item 11).**
+
+| Wave | Scope | Size |
+|---|---|---|
+| A. Cafe operations | Table service (11.1), pricing and charges engine (11.4), cash control and loss prevention (11.5), GST reports and exports (11.8) | L |
+| B. Bakery | Weight billing and scale, advance/custom orders, stock-lite with batch/expiry/wastage, label printing, direct ESC/POS and cash-drawer hardware (11.2, 11.3, 11.7) | L |
+| C. Growth | Customers, loyalty and credit accounts (11.6), fast onboarding with CSV and photo-to-menu import (11.9), WhatsApp commerce and marketing (12.2) | L |
+| D. Channels and AI | Aggregator and ONDC adapters (12.1), demand forecasting and prep suggestions, voice ordering (12.3) | L |
+| Later | Capacitor/Tauri wrappers, native print bridge, LAN hub, multi-stall mall QR with split settlement | — |
 
 ---
 
-## 13. Open items
+## 17. Open items
 1. Confirm bring-your-own Razorpay keys for diner payments (versus Razorpay Route).
 2. Plan tiers and per-shop pricing.
 3. CA review: GST invoice series format and subscription invoicing. Legal review: DPDP.
@@ -347,9 +519,37 @@ Passes only if tests 1–5 all hold; failure of any of 1–4 falls back to custo
 8. "Pay at counter" mode: ship in v1 or leave out (prepayment only)?
 9. Confirm scope: one QR set per cafe (assumed) versus a multi-stall mall QR.
 10. Confirm variants and modifiers are in scope for the big-cafe requirement (they are not in the current product plan).
+11. **Beta segment and wave order:** are the 2–3 beta cafes plain cafes, or does one include a bakery? This decides whether Wave A or Wave B ships first.
+12. CA review of: the tax defaults, credit notes and amendments, tax timing on advances, service charge presentation, invoice series, and subscription invoicing. Verify the FSSAI-on-invoice requirement.
+13. Aggregator route per platform (partner or middleware versus direct API) and the WhatsApp Business provider.
+14. AI photo-to-menu provider, data-handling terms and per-shop cost cap.
+15. A device survey of the real cafes (tablets, PCs, printers, scales) to fix the supported-device matrix and the non-functional targets.
+16. Whether a customer-facing display is needed for the beta.
 
-## 14. Risks
+## 18. Risks
 - **PowerSync fit** (web SDK, iOS storage): mitigated by the spike and the Option B fallback behind the repository seam.
 - **Data-layer rewrite** (Phase 2 is the largest): mitigated by keeping `calc.ts`, UI and tests, and by the feature-parity gate.
-- **Free-tier pause or no backups**: acceptable for the pilot only; go-live trigger in section 11.
+- **Free-tier pause or no backups**: acceptable for the pilot only; go-live trigger in section 15.
 - **Cross-device outage gap**: with cloud-only sync, devices in one shop cannot see each other's orders while the internet is down. Accepted for v1; LAN hub is the planned answer.
+- **Scope breadth.** The spec now covers a full cafe-plus-bakery product. Mitigated by schema-first design, waves with gates, and choosing the beta segment early. The main danger is trying to ship several waves before the first beta.
+- **Tax and compliance correctness.** Rates and rules change and vary by how an item is sold. Mitigated by data-driven, effective-dated tax with per-line snapshots and CA sign-off, but a wrong default still produces wrong invoices, so it is a launch gate.
+- **Hardware variety.** Web printing, scale and drawer support differ by model and OS. Mitigated by the `PrinterPort` abstraction, a published support matrix, and browser print as the universal fallback.
+
+---
+
+## Appendix A. Review log (2026-09-20)
+| Finding | Addressed in |
+|---|---|
+| W1 Walk-in UPI on trust | 10.3 |
+| W2 Refunds need credit notes; amendments | 10.2 |
+| W3 Thin tax model | 10.1, section 3 |
+| W4 Integer quantity | section 5 conventions |
+| W5 PIN hashes and manager credentials on counters | 4, 4.1 |
+| W6 Per-cafe restore under pooled tenancy | section 7 |
+| W7 Noisy neighbour | section 7 |
+| W8 Read/write rule drift | 4.1 |
+| W9 Memberships, non-functional targets, older bills | 4.1, 13.2 |
+| W10 Incomplete cost model | 13.4 |
+| Missed requirements (table service, bakery, stock, pricing, cash, customers, reports, onboarding, legal) | 11, 13 |
+| Trends (aggregators, WhatsApp, AI, kiosk) | 12, 9.5 |
+| Combination edge cases | section 14 |
