@@ -4,14 +4,20 @@ Project ref `hiwufsjnhfrzevjvfefp` — <https://hiwufsjnhfrzevjvfefp.supabase.co
 
 ## Applying migrations
 
-Either paste each file, in order, into **SQL Editor** in the dashboard, or link
-the CLI and push:
+Migrations are code. Never paste SQL into the dashboard to change the schema.
 
 ```bash
-npx supabase login
-npx supabase link --project-ref hiwufsjnhfrzevjvfefp
-npx supabase db push
+npx supabase migration new <name>   # creates supabase/migrations/<timestamp>_<name>.sql
+npx supabase db push --dry-run      # preview
+npx supabase db push                # apply
 ```
+
+Every migration enables RLS on its tables and includes explicit GRANTs.
+
+## Public environment variables
+
+Every `VITE_*` value is public. `npm run build` refuses to ship `VITE_PUBLISH_TOKEN` or any
+secret-looking `VITE_` value unless `ALLOW_PUBLIC_PUBLISH_TOKEN=1` is set (token only).
 
 ## Secrets the edge functions need
 
