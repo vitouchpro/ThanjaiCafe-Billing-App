@@ -5,6 +5,7 @@ create table if not exists public.rate_limits (
   count        int         not null default 0,
   primary key (key, window_start)
 );
+create index if not exists rate_limits_window_idx on public.rate_limits (window_start);
 
 alter table public.rate_limits enable row level security;
 -- No policies: deny-all for anon and authenticated. service_role bypasses RLS.

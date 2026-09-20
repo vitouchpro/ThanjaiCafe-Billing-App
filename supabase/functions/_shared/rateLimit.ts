@@ -6,13 +6,18 @@ export const CREATE_ORDER_LIMITS = {
   perTable: { max: 60, windowSeconds: 60 },
 } as const;
 
+/* Cloudflare sets cf-connecting-ip itself, so it is the trusted source. A
+   client can prepend entries to x-forwarded-for, so that header is only a
+   fallback (first entry, unchanged behaviour). */
 export function clientIp(req: Request): string {
+  const cf = req.headers.get('cf-connecting-ip')?.trim();
+  if (cf) return cf;
   const forwarded = req.headers.get('x-forwarded-for');
   if (forwarded) {
     const first = forwarded.split(',')[0].trim();
     if (first) return first;
   }
-  return req.headers.get('cf-connecting-ip')?.trim() || 'unknown';
+  return 'unknown';
 }
 
 export function rateLimitKey(scope: string, ...parts: string[]): string {

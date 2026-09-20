@@ -2,7 +2,7 @@
 # https://supabase.com/docs/guides/local-development/cli/config
 # A string used to distinguish different Supabase projects on the same host. Defaults to the
 # working directory name when running `supabase init`.
-project_id = "ThanjaiCafe-Billing-App-phase0"
+project_id = "thanjaicafe-billing-app"
 
 [api]
 enabled = true
@@ -383,6 +383,12 @@ deno_version = 2
 
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
+
+# Razorpay calls verify-payment with an HMAC signature and no Supabase JWT; the
+# function verifies that signature itself. Every other function is called by
+# supabase-js with the anon JWT and keeps the default (verify_jwt = true).
+[functions.verify-payment]
+verify_jwt = false
 
 [analytics]
 enabled = true

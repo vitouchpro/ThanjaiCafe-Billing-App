@@ -10,6 +10,18 @@ describe('clientIp', () => {
   it('falls back to cf-connecting-ip', () => {
     expect(clientIp(req({ 'cf-connecting-ip': '198.51.100.4' }))).toBe('198.51.100.4');
   });
+  it('prefers cf-connecting-ip over x-forwarded-for when both are present', () => {
+    expect(clientIp(req({
+      'x-forwarded-for': '192.0.2.99, 10.0.0.1',
+      'cf-connecting-ip': '198.51.100.4',
+    }))).toBe('198.51.100.4');
+  });
+  it('falls back to the first x-forwarded-for entry when cf-connecting-ip is empty', () => {
+    expect(clientIp(req({
+      'x-forwarded-for': '203.0.113.7, 10.0.0.1',
+      'cf-connecting-ip': '',
+    }))).toBe('203.0.113.7');
+  });
   it('returns unknown when nothing identifies the caller', () => {
     expect(clientIp(req({}))).toBe('unknown');
   });
