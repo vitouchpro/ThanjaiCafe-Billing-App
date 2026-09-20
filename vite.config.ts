@@ -25,9 +25,9 @@ export default defineConfig(({ command, mode }) => {
         workbox: {
           // Product photos must precache too — without webp here the POS shows
           // broken images the moment it goes offline.
-          globPatterns: ['**/*.{js,css,html,svg,woff2,webp,png,ico}'],
+          globPatterns: ['**/*.{js,css,html,svg,woff2,webp,png,ico,wasm}'],
           // The photo set pushes the bundle past the default 2 MiB cap.
-          maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+          maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
           cleanupOutdatedCaches: true,
           navigateFallback: 'index.html',
           // The till's offline shell must never be served to a customer's phone.
@@ -54,5 +54,8 @@ export default defineConfig(({ command, mode }) => {
     resolve: {
       alias: { '@': path.resolve(import.meta.dirname, './src') },
     },
+    // PowerSync ships its own web workers and WASM; pre-bundling breaks them.
+    optimizeDeps: { exclude: ['@powersync/web'] },
+    worker: { format: 'es' },
   }
 })

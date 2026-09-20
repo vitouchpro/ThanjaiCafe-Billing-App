@@ -43,6 +43,8 @@ const OrderStatusPage = lazy(() =>
 const ThanksPage = lazy(() =>
   import('@/pages/Customer/ThanksPage').then((m) => ({ default: m.ThanksPage })));
 
+const SpikePage = lazy(() => import('@/spike/SpikePage').then((m) => ({ default: m.SpikePage })));
+
 function RouteFallback() {
   return (
     <div className="h-full grid place-items-center py-20">
@@ -85,6 +87,8 @@ export function AppRoutes() {
         path="/login"
         element={user ? <Navigate to={landingRoute(user)} replace /> : <LoginPage />}
       />
+
+      <Route path="/spike" element={<Suspense fallback={<RouteFallback />}><SpikePage /></Suspense>} />
 
       {/* Customer ordering. Deliberately outside RequireAuth — a diner has no
           PIN — and lazy-loaded so a phone never downloads the POS bundle. */}
