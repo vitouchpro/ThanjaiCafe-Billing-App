@@ -1333,7 +1333,7 @@ cd ../ThanjaiCafe-Billing-App-spike
 npm ci
 ```
 
-- [ ] **Step 2: Create the dev Supabase project** in the dashboard (name `cafe-dev`, region closest to Chennai, for example Mumbai). This uses the second free project slot and stays as the permanent dev/staging project. Copy the project URL and the publishable (anon) key into `.env.local` in the spike worktree:
+- [ ] **Step 2: Create the dev Supabase project** in the dashboard (name `cafe-dev`, region closest to Chennai, for example Mumbai). This uses the second free project slot and stays as the permanent dev/staging project. Copy the project URL and the publishable (anon) key into a NEW `.env.local` in the spike worktree (do not copy `.env.example`: it pre-fills the PRODUCTION project URL; type only the three lines below):
 
 ```
 VITE_SUPABASE_URL=https://<spike-ref>.supabase.co
@@ -1530,7 +1530,7 @@ streams:
       - SELECT * FROM bills WHERE shop_id = auth.parameter('shop_id')
       - SELECT * FROM bill_lines WHERE shop_id = auth.parameter('shop_id')
 ```
-If the dashboard rejects `auth.parameter('shop_id')`, use `auth.jwt() ->> 'shop_id'` instead. Record which form worked in the findings doc.
+If the dashboard rejects `auth.parameter('shop_id')`, use `auth.jwt() ->> 'shop_id'` instead. **The dangerous failure is not a rejection:** a claim form that is accepted but wrong evaluates to NULL, matches nothing, and syncs NOTHING, which looks exactly like perfect isolation. So after deploying, sign in as A/T1 and confirm the SpikePage `local rows` line shows non-zero, correctly scoped counts (`shops` 1, `devices` 2, `products` 5). If everything is 0, the claim form is wrong: switch to `auth.jwt() ->> 'shop_id'` and re-deploy before concluding anything about PowerSync. Record which form worked in the findings doc.
 
 - [ ] **Step 5: Write** `spike/seed.mjs`
 
@@ -2300,7 +2300,7 @@ node spike/tests/cross-tenant.mjs
 ```
 Expected: every line `PASS` and exit code 0. Any `FAIL` is a failure of test 3 (server side): fix the policy or hook, do not weaken the script.
 
-- [ ] **Step 3: Test 3, client side.** Sign in as A/T1 on `/spike` and note `local rows`; wipe and sign in as B/T1 in a private window. Pass condition: B's local database contains only shop B's rows (`shops` count 1, and none of A's invoice numbers appear). Record both counts.
+- [ ] **Step 3: Test 3, client side.** Sign in as A/T1 on `/spike` and note `local rows`; wipe and sign in as B/T1 in a private window. Pass condition: the `local rows` line shows the POSITIVE control for each shop AND no leakage. Shop A/T1 must show `shops` 1, `devices` 2, `products` 5; shop B/T1 must show `shops` 1, `devices` 1, `products` 5, and none of A's invoice numbers may appear in B's bill list. Non-zero, correctly scoped counts prove the claim form works; "nothing visible" proves nothing. Record both count lines. Note: "Sign out and wipe local data" refuses to run while the upload queue is not empty; wait for it to reach 0 first.
 
 - [ ] **Step 4: Test 4, two devices offline.** Use two browser profiles (for example Chrome and Edge). Sign profile 1 in as A/T1 and profile 2 as A/T2; wait for `hasSynced=true` on both. In each, DevTools → Network → set Offline. Create 5 bills on each. Confirm the local lists show `T1/2627/000001..000005` on one and `T2/2627/000001..000005` on the other. Go online in both.
 
@@ -2309,10 +2309,12 @@ Pass conditions, checked in the SQL editor:
 ```sql
 select device_id, invoice_no, count(*) from public.bills group by 1, 2 having count(*) > 1;  -- expect 0 rows
 select count(*) from public.bills;                                                             -- expect 10 more than before
+select count(*) from public.bill_lines;                                                        -- expect 30 more than before (3 lines per bill)
+select bill_id, count(*) from public.bill_lines group by 1 having count(*) <> 3;               -- expect 0 rows (no bill with missing lines)
 ```
-and both profiles show all 10 bills with the upload queue at 0. Then repeat once, closing one tab mid-upload; after reopening and reconnecting, the row count must still be exactly 10 with no duplicates.
+Counting bills alone is not enough: an upload that fails on a line discards the rest of its transaction, so a bill can arrive with fewer lines while the queue still drains to 0. Also read the SpikePage Sync lines `discarded uploads` (must be 0) and `last upload error` (must be none). Both profiles must show all 10 bills with the upload queue at 0. Then repeat once, closing one tab mid-upload; after reopening and reconnecting, the row count must still be exactly 10 with no duplicates.
 
-- [ ] **Step 5: Test 2, persistence matrix.** For each of Android Chrome (installed as a PWA), Windows Edge (installed as an app) and iOS Safari (Add to Home Screen): sign in, wait for sync, create 3 bills offline, fully close the app, reopen while still offline, and confirm the 3 bills and the products are there. Press "Check / request persistent storage" and record `persisted`, `persistAfterRequest`, `usage` and `quota`. Then leave each device untouched for 7 days and repeat the check; note the day you re-checked. If a browser evicts the data, that platform fails test 2.
+- [ ] **Step 5: Test 2, persistence matrix.** For each of Android Chrome (installed as a PWA), Windows Edge (installed as an app) and iOS Safari (Add to Home Screen): sign in, wait for sync, create 3 bills offline, fully close the app, reopen while still offline, and confirm the 3 bills and the products are there. Press "Check / request persistent storage" and record `persisted`, `persistAfterRequest`, `usage` and `quota` (note: `usage` includes the roughly 9 MB app precache, so it is not bill data). Then leave each device untouched for 7 days and repeat the check; note the day you re-checked. If a browser evicts the data, that platform fails test 2.
 
 - [ ] **Step 6: Test 2b, multi-tab.** On one device open `/spike` in two tabs, click "New 5 bills" in both at nearly the same time, and confirm no duplicate invoice numbers (`select invoice_no, count(*) ... having count(*) > 1` returns 0 rows).
 
@@ -2530,7 +2532,7 @@ export function PerfPanel({ ctx }: { ctx: DeviceContext | null }) {
       <PerfPanel ctx={claims && codeRow.data[0]?.code ? { shopId: claims.shopId, deviceId: claims.deviceId, deviceCode: codeRow.data[0].code } : null} />
 ```
 
-- [ ] **Step 7: Measure query speed.** On the slowest available Android tablet and a Windows PC: sign in, click "Seed 100k local rows", then "Run queries" and record the table. Pass: first page < 200 ms and today's dashboard < 300 ms. If a query fails, add or adjust an index in `bills_perf`, re-seed and re-measure once before recording a fail; record the index that fixed it.
+- [ ] **Step 7: Measure query speed.** On the slowest available Android tablet and a Windows PC: sign in, click "Seed 100k local rows", then "Run queries" and record the table. Pass: first page < 200 ms and today's dashboard < 300 ms. If a query fails, add or adjust an index in `bills_perf`, re-seed and re-measure once before recording a fail; record the index that fixed it, and whether the same index is expressible on the SYNCED `bills` table (that is where it would have to live in production, not on the local-only `bills_perf`). Confirm the panel's `bills_perf rows:` line reads 100000 before recording a result; the numbers are warm-cache (one warm-up run), so also note how long the first history open takes cold after a fresh app start.
 
 - [ ] **Step 8: Measure real bytes per bill and sync cost.** Sign in as A/T1 with an empty shop, note the row count, click "Create 2000 real bills", and wait until the upload queue is 0. Then in the SQL editor:
 
@@ -2645,7 +2647,7 @@ npx tsc -b && npx vitest run src/spike
 ```
 Expected: no errors, tests pass.
 
-- [ ] **Step 5: Hardware matrix.** Use each printer model the pilot cafes actually own (ask the owner, or the device survey). For each: on Windows Chrome and Edge, and on Android Chrome (HTTPS or localhost only), click each button and record: prints yes/no, drawer opens yes/no, and any error text. On Windows, if the vendor driver claims the printer so WebUSB cannot open it, record that and whether Web Serial works via the printer's virtual COM port. Test 6 (kiosk flag): start Chrome as `chrome.exe --kiosk-printing --user-data-dir=%TEMP%\kiosk-test http://localhost:5173/spike`, click "Browser print" and record whether it printed with no dialog.
+- [ ] **Step 5: Hardware matrix.** Use each printer model the pilot cafes actually own (ask the owner, or the device survey). For each: on Windows Chrome and Edge, and on Android Chrome (HTTPS or localhost only), click each button and record: prints yes/no, drawer opens yes/no, and any error text. On Windows, if the vendor driver claims the printer so WebUSB cannot open it, record that and whether Web Serial works via the printer's virtual COM port. Before concluding Web Serial fails, print the printer's own self-test slip to read its serial baud rate and pick the matching value in the "Serial baud" selector (9600 is only the default). Web Bluetooth printing is NOT covered by this spike (it needs printer-specific GATT service UUIDs); test 7 covers WebUSB and Web Serial only, and the findings doc must say so. Test 6 (kiosk flag): start Chrome as `chrome.exe --kiosk-printing --user-data-dir=%TEMP%\kiosk-test http://localhost:5173/spike`, click "Browser print" and record whether it printed with no dialog.
 
 - [ ] **Step 6: Commit** (spike branch): `git add src/spike && git commit -m "spike: direct printing and cash drawer tests"`
 
@@ -2745,7 +2747,7 @@ The relative import reaches `supabase/functions/verify-payment/signature.ts` in 
 - [ ] **Step 4: Deploy to the SPIKE project only**
 
 ```bash
-npx supabase functions deploy spike-till-qr --project-ref <spike-ref> --no-verify-jwt
+npx supabase functions deploy spike-till-qr --project-ref <spike-ref>
 npx supabase functions deploy spike-qr-webhook --project-ref <spike-ref> --no-verify-jwt
 npx supabase secrets set --project-ref <spike-ref> RAZORPAY_KEY_ID=<test key id> RAZORPAY_KEY_SECRET=<test key secret> RAZORPAY_WEBHOOK_SECRET=<spike webhook secret>
 ```
@@ -2754,9 +2756,9 @@ The human types the secret values; use Razorpay test-mode keys. Then in Razorpay
 - [ ] **Step 5: Create a QR and pay it**
 
 ```bash
-curl -s -X POST "https://<spike-ref>.supabase.co/functions/v1/spike-till-qr" -H "Content-Type: application/json" -d '{"billId":"spike-bill-1","amountPaise":1000}'
+curl -s -X POST "https://<spike-ref>.supabase.co/functions/v1/spike-till-qr" -H "Content-Type: application/json" -H "Authorization: Bearer <spike publishable key>" -H "apikey: <spike publishable key>" -d '{"billId":"spike-bill-1","amountPaise":1000}'
 ```
-Expected: JSON with `qrId`, `imageUrl` and `status: "active"`. Open `imageUrl`. In the Razorpay test dashboard, use whatever test-mode payment simulation it offers for a QR; if none exists, record that verified UPI can be exercised end to end only in live mode with a real ₹1 payment, and do that once only if the owner agrees.
+`spike-till-qr` keeps Supabase's default JWT check (no `--no-verify-jwt`), so the call needs the spike project's publishable key; only the webhook logger is open, because Razorpay sends no JWT and the function verifies the HMAC itself. Expected: JSON with `qrId`, `imageUrl` and `status: "active"`. Open `imageUrl`. In the Razorpay test dashboard, use whatever test-mode payment simulation it offers for a QR; if none exists, record that verified UPI can be exercised end to end only in live mode with a real ₹1 payment, and do that once only if the owner agrees.
 
 - [ ] **Step 6: Record what arrived**
 
@@ -2800,8 +2802,9 @@ Decision rule (from the spec): PowerSync proceeds only if tests 1-5 ALL pass. If
 | 5 | 100k bills on a low-end Android: first page < 200 ms, today's dashboard < 300 ms | PASS / FAIL | measurement table, device model, bytes per bill vs 1500, first-sync time |
 | 5b | Sync window by client-supplied date | SUPPORTED / NOT | syntax or fallback |
 | 6 | Kiosk-printing on Windows Chrome and Android | PASS / FAIL | dialog-less or not |
-| 7 | Direct ESC/POS (WebUSB, Web Serial) and drawer kick per printer model | table | per model and OS |
-| 8 | Verified UPI: QR created, webhook received, signature valid | PASS / PARTIAL | event names, payload shape, latency |
+| 5c | Cold vs warm: first history open right after a fresh app start on the low-end Android (the harness numbers are warm-cache) | recorded | cold ms, warm median |
+| 7 | Direct ESC/POS (WebUSB, Web Serial) and drawer kick per printer model. **Web Bluetooth was NOT tested** (spec test 7 names it): state this explicitly | table | per model and OS, baud used |
+| 8 | Verified UPI: QR created, webhook received, signature valid. **Narrowed vs the spec:** "confirmation reaches the till within seconds" and the `offline_unverified` mode are NOT tested by this spike: state this explicitly | PASS / PARTIAL | event names, payload shape, latency |
 | 9 | Record only: WAL growth, pg_cron on free, UPI AutoPay limit, PowerSync connection type (direct or pooler), Sync Streams claim syntax that worked | recorded | values |
 
 ## Decision
