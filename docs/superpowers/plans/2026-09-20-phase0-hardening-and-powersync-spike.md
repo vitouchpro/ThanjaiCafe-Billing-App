@@ -2745,7 +2745,7 @@ The relative import reaches `supabase/functions/verify-payment/signature.ts` in 
 - [ ] **Step 4: Deploy to the SPIKE project only**
 
 ```bash
-npx supabase functions deploy spike-till-qr --project-ref <spike-ref> --no-verify-jwt
+npx supabase functions deploy spike-till-qr --project-ref <spike-ref>
 npx supabase functions deploy spike-qr-webhook --project-ref <spike-ref> --no-verify-jwt
 npx supabase secrets set --project-ref <spike-ref> RAZORPAY_KEY_ID=<test key id> RAZORPAY_KEY_SECRET=<test key secret> RAZORPAY_WEBHOOK_SECRET=<spike webhook secret>
 ```
@@ -2754,9 +2754,9 @@ The human types the secret values; use Razorpay test-mode keys. Then in Razorpay
 - [ ] **Step 5: Create a QR and pay it**
 
 ```bash
-curl -s -X POST "https://<spike-ref>.supabase.co/functions/v1/spike-till-qr" -H "Content-Type: application/json" -d '{"billId":"spike-bill-1","amountPaise":1000}'
+curl -s -X POST "https://<spike-ref>.supabase.co/functions/v1/spike-till-qr" -H "Content-Type: application/json" -H "Authorization: Bearer <spike publishable key>" -H "apikey: <spike publishable key>" -d '{"billId":"spike-bill-1","amountPaise":1000}'
 ```
-Expected: JSON with `qrId`, `imageUrl` and `status: "active"`. Open `imageUrl`. In the Razorpay test dashboard, use whatever test-mode payment simulation it offers for a QR; if none exists, record that verified UPI can be exercised end to end only in live mode with a real ₹1 payment, and do that once only if the owner agrees.
+`spike-till-qr` keeps Supabase's default JWT check (no `--no-verify-jwt`), so the call needs the spike project's publishable key; only the webhook logger is open, because Razorpay sends no JWT and the function verifies the HMAC itself. Expected: JSON with `qrId`, `imageUrl` and `status: "active"`. Open `imageUrl`. In the Razorpay test dashboard, use whatever test-mode payment simulation it offers for a QR; if none exists, record that verified UPI can be exercised end to end only in live mode with a real ₹1 payment, and do that once only if the owner agrees.
 
 - [ ] **Step 6: Record what arrived**
 
