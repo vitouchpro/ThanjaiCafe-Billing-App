@@ -46,27 +46,36 @@ Deno.serve(async (req) => {
     /* Bound how fast one caller, and one table, can open orders. If the limiter
        itself fails we log and carry on: a broken counter must never stop a
        diner from paying. */
-    const ip = clientIp(req);
-    const [perIp, perTable] = await Promise.all([
-      admin.rpc('bump_rate_limit', {
-        p_key: rateLimitKey('create-order', ip, tableCode),
+    const tooMany = () => json(
+      { error: 'Too many orders from this table right now. Please wait a minute and try again.' },
+      429, cors, { 'Retry-After': '60' },
+    );
+    try {
+      const ip = clientIp(req);
+      // The per-caller counter goes first. A request it rejects must never
+      // count against the shared table bucket, or one caller could lock every
+      // diner out of the table.
+      const perIp = await admin.rpc('bump_rate_limit', {
+        p_key: rateLimitKey('create-order', 'ip', ip, tableCode),
         p_window_seconds: CREATE_ORDER_LIMITS.perIpPerTable.windowSeconds,
-      }),
-      admin.rpc('bump_rate_limit', {
-        p_key: rateLimitKey('create-order', 'table', tableCode),
-        p_window_seconds: CREATE_ORDER_LIMITS.perTable.windowSeconds,
-      }),
-    ]);
-    if (perIp.error || perTable.error) {
-      console.error('create-order: rate limiter unavailable', perIp.error ?? perTable.error);
-    } else if (
-      isOverLimit(Number(perIp.data), CREATE_ORDER_LIMITS.perIpPerTable.max) ||
-      isOverLimit(Number(perTable.data), CREATE_ORDER_LIMITS.perTable.max)
-    ) {
-      return json(
-        { error: 'Too many orders from this table right now. Please wait a minute and try again.' },
-        429, cors, { 'Retry-After': '60' },
-      );
+      });
+      if (perIp.error) {
+        console.error('create-order: rate limiter unavailable', perIp.error);
+      } else if (isOverLimit(Number(perIp.data), CREATE_ORDER_LIMITS.perIpPerTable.max)) {
+        return tooMany();
+      } else {
+        const perTable = await admin.rpc('bump_rate_limit', {
+          p_key: rateLimitKey('create-order', 'table', tableCode),
+          p_window_seconds: CREATE_ORDER_LIMITS.perTable.windowSeconds,
+        });
+        if (perTable.error) {
+          console.error('create-order: rate limiter unavailable', perTable.error);
+        } else if (isOverLimit(Number(perTable.data), CREATE_ORDER_LIMITS.perTable.max)) {
+          return tooMany();
+        }
+      }
+    } catch (err) {
+      console.error('create-order: rate limiter unavailable', err);
     }
 
     const { data: menu, error: menuErr } = await admin

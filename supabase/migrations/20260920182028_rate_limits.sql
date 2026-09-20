@@ -9,6 +9,7 @@ create table if not exists public.rate_limits (
 alter table public.rate_limits enable row level security;
 -- No policies: deny-all for anon and authenticated. service_role bypasses RLS.
 revoke all on table public.rate_limits from anon, authenticated;
+grant select, insert, update, delete on table public.rate_limits to service_role;
 
 create or replace function public.bump_rate_limit(p_key text, p_window_seconds int)
 returns int
