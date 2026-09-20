@@ -15,14 +15,14 @@ const OPTS = { pricesIncludeTax: false, roundTotals: false };
 describe('server money engine', () => {
   it('is a verbatim copy of the browser engine below the shim', () => {
     const root = join(__dirname, '..', '..', '..', '..');
-    const browser = readFileSync(join(root, 'src/services/billing/calc.ts'), 'utf8');
-    const deno = readFileSync(join(root, 'supabase/functions/_shared/calc.ts'), 'utf8');
+    const browser = readFileSync(join(root, 'src/services/billing/calc.ts'), 'utf8').replace(/\r\n/g, '\n');
+    const deno = readFileSync(join(root, 'supabase/functions/_shared/calc.ts'), 'utf8').replace(/\r\n/g, '\n');
 
     // The Deno file is the shim followed by calc.ts with its import lines
     // removed. Comparing the remainder is what catches drift.
-    // Normalize line endings (CRLF to LF) for Windows compatibility.
-    const belowShim = deno.replace(/^[\s\S]*?\/\* END SHIM \*\/\n/, '').trim().replace(/\r\n/g, '\n');
-    const withoutImports = browser.split('\n').filter((l) => !l.startsWith('import ')).join('\n').trim().replace(/\r\n/g, '\n');
+    // Line endings are normalized to LF on read, so CRLF files work correctly.
+    const belowShim = deno.replace(/^[\s\S]*?\/\* END SHIM \*\/\n/, '').trim();
+    const withoutImports = browser.split('\n').filter((l) => !l.startsWith('import ')).join('\n').trim();
     expect(belowShim).toBe(withoutImports);
   });
 
