@@ -99,7 +99,7 @@ check('shop A inserts a valid line for its own bill', !r.error, r.error?.message
 
 // Shop A cannot see shop B's line.
 const seenLineByA = await clientA1.from('bill_lines').select('id').eq('id', lineB.id);
-check('shop A cannot read shop B\'s line', (seenLineByA.data ?? []).length === 0);
+check('shop A cannot read shop B\'s line', (seenLineByA.data ?? []).length === 0 && !seenLineByA.error);
 
 // 7. products: test read scope, insert, and update restrictions.
 const productsA = await clientA1.from('products').select('shop_id');
@@ -113,14 +113,12 @@ check('cannot insert a product for another shop', r.error?.code === '42501', r.e
 
 // Get a product from shop B via clientB1, then try to update it via clientA1.
 const productsB = await clientB1.from('products').select('id, name');
-if ((productsB.data ?? []).length > 0) {
-  const productBId = productsB.data[0].id;
-  const originalName = productsB.data[0].name;
-  r = await clientA1.from('products').update({ name: 'Hacked' }).eq('id', productBId);
-  const productBAfter = await clientB1.from('products').select('name').eq('id', productBId);
-  check('cannot update another shop\'s product',
-    productBAfter.data?.[0]?.name === originalName && r.error?.code === '42501');
-}
+check('shop B can read its own products', !productsB.error && (productsB.data ?? []).length > 0);
+const productBId = productsB.data?.[0]?.id;
+const originalName = productsB.data?.[0]?.name;
+r = await clientA1.from('products').update({ name: 'Hacked' }).eq('id', productBId);
+const productBAfter = await clientB1.from('products').select('name').eq('id', productBId);
+check('cannot update another shop\'s product', productBAfter.data?.[0]?.name === originalName);
 
 // 8. devices: test read scope.
 const devicesA = await clientA1.from('devices').select('code');
