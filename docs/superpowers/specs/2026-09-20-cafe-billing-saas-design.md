@@ -1,7 +1,7 @@
 # Cafe Billing SaaS — Multi-Tenant, Offline-First Design
 
 **Date:** 2026-09-20
-**Status:** Design approved in conversation; revised 2026-09-20 to add mall-style QR self-ordering (section 9) and the cafe/bakery operations review (sections 10–13, appendix A); awaiting written-spec review
+**Status:** Design approved in conversation; revised 2026-09-20 to add mall-style QR self-ordering (section 9) and the cafe/bakery operations review (sections 10–13, appendix A); Wave A confirmed as the first post-beta wave; spec approved for planning
 **Scope:** Turn `thangai-pos` (single-cafe, single-till) into a subscription product sold to many cafes, with several billing devices per cafe syncing live, on Supabase.
 
 ---
@@ -496,7 +496,7 @@ Passes only if tests 1–5 all hold; failure of any of 1–4 falls back to custo
 | 5. Go-live | Upgrade to paid tiers, load test, restore drill, per-shop restore tool, external security test, GST/CA and DPDP review, beta with 2–3 cafes | M | Restore drill succeeds; beta cafes live |
 
 ### Post-beta waves
-The schema for all of these exists from Phase 1, so each wave adds features and never migrations of historical bills. The order below is the default. **Which wave the beta needs first depends on whether the beta cafes are cafes or bakeries (open item 11).**
+The schema for all of these exists from Phase 1, so each wave adds features and never migrations of historical bills. **Decision (2026-09-20): Wave A ships first**, then B, C, D in the order below (open item 11).
 
 | Wave | Scope | Size |
 |---|---|---|
@@ -519,7 +519,7 @@ The schema for all of these exists from Phase 1, so each wave adds features and 
 8. "Pay at counter" mode: ship in v1 or leave out (prepayment only)?
 9. Confirm scope: one QR set per cafe (assumed) versus a multi-stall mall QR.
 10. Confirm variants and modifiers are in scope for the big-cafe requirement (they are not in the current product plan).
-11. **Beta segment and wave order:** are the 2–3 beta cafes plain cafes, or does one include a bakery? This decides whether Wave A or Wave B ships first.
+11. **Beta segment and wave order: decided 2026-09-20 — Wave A (cafe operations) ships first,** then B, C, D. Bakery features (Wave B) follow; the Phase 1 schema already includes their tables, so nothing is retrofitted.
 12. CA review of: the tax defaults, credit notes and amendments, tax timing on advances, service charge presentation, invoice series, and subscription invoicing. Verify the FSSAI-on-invoice requirement.
 13. Aggregator route per platform (partner or middleware versus direct API) and the WhatsApp Business provider.
 14. AI photo-to-menu provider, data-handling terms and per-shop cost cap.
