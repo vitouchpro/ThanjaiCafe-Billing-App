@@ -8,6 +8,9 @@
 import { createClient } from '@supabase/supabase-js';
 import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
+import { TABLE_MANIFEST } from '../isolation/table-manifest.mjs';
+
+const manifestByTable = new Map(TABLE_MANIFEST.map((e) => [e.table, e]));
 
 const yamlPath = new URL('../../../docs/superpowers/ops/sync-streams-phase1.yaml', import.meta.url);
 const config = parse(readFileSync(yamlPath, 'utf8'));
@@ -57,6 +60,21 @@ const { data: device } = await admin.from('devices').insert({ shop_id: shop.id, 
 const anon = createClient(url, anonKey, { auth: { persistSession: false } });
 await anon.auth.signInWithPassword({ email, password });
 
+// Seed one representative row per table that has a manifest entry (Task 20's
+// TABLE_MANIFEST), so the sync-vs-RLS comparison below has real, non-empty
+// data to agree on for those tables instead of vacuously comparing two empty
+// sets. Tables without a manifest entry remain leak-only checks (still
+// meaningful, just weaker: they'd only catch RLS scoped to the wrong shop,
+// not RLS that's missing/disabled entirely on an otherwise-empty table).
+let seedSeq = 1;
+for (const { table } of queries) {
+  const entry = manifestByTable.get(table);
+  if (!entry || entry.shopScoped === false) continue;
+  const row = entry.buildRow({ shopId: shop.id, deviceId: device.id, seq: seedSeq++ });
+  const { error: seedErr } = await admin.from(table).insert(row);
+  if (seedErr) console.log(`(seed warning) ${table}: ${seedErr.message}`);
+}
+
 for (const { table, whereClause } of queries) {
   // Sync side: run the literal SQL via service_role's Postgres session using
   // an RPC wrapper (service_role can execute arbitrary read SQL through
@@ -75,7 +93,7 @@ for (const { table, whereClause } of queries) {
   const syncIds = new Set((syncRows ?? []).map((r) => r.id));
   const rlsIds = new Set((rlsRows ?? []).map((r) => r.id));
   const agree = syncIds.size === rlsIds.size && [...syncIds].every((id) => rlsIds.has(id));
-  check(`${table}: sync-stream scope matches RLS scope`, agree, `sync=${syncIds.size} rls=${rlsIds.size}`);
+  check(`${table}: sync-stream scope matches RLS scope${manifestByTable.has(table) ? ' (seeded)' : ''}`, agree, `sync=${syncIds.size} rls=${rlsIds.size}`);
 }
 
 await admin.from('devices').delete().eq('id', device.id);
