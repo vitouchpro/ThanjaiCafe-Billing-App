@@ -38,5 +38,23 @@ for (const entry of TABLE_MANIFEST) {
   check(`${entry.table}: device sees no shop-B rows`, !leaked && !seen.error, seen.error?.message ?? '');
 }
 
+// Teardown, mirroring supabase/tests/agreement/sync-rls-agreement.mjs: delete
+// every seeded manifest row for BOTH shops before tearing down the
+// device/shops/account, because shifts, bills etc. reference devices and shops
+// with no cascade — deleting devices first would fail on FK violations and
+// (these delete calls' errors being unchecked) silently leak orphaned test
+// data into the target database on every run.
+for (const entry of TABLE_MANIFEST) {
+  if (entry.shopScoped === false) continue; // never seeded above
+  await admin.from(entry.table).delete().eq('shop_id', shopA.id);
+  await admin.from(entry.table).delete().eq('shop_id', shopB.id);
+}
+
+await admin.from('devices').delete().eq('id', deviceA.id);
+await admin.from('shops').delete().eq('id', shopA.id);
+await admin.from('shops').delete().eq('id', shopB.id);
+await admin.from('accounts').delete().eq('id', account.id);
+await admin.auth.admin.deleteUser(user.user.id);
+
 console.log(failures === 0 ? '\nAll generic read-scoping checks passed.' : `\n${failures} check(s) FAILED.`);
 process.exit(failures === 0 ? 0 : 1);

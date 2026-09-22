@@ -3,8 +3,21 @@
 -- literal query against RLS-scoped access. Restricted to service_role and
 -- to statements starting with "select" (case-insensitive) to prevent
 -- misuse if this function is ever called from a wider context by mistake.
+--
+-- Returns `table(id text)`, not `setof record`: PostgREST cannot call a
+-- record-returning function without an explicit column definition list
+-- ("a column definition list is required for functions returning record").
+-- The agreement test only ever needs an identity set, so every caller
+-- projects exactly one text column aliased `id` (see the IDENTITY_COLUMNS
+-- map in supabase/tests/agreement/sync-rls-agreement.mjs for tables whose
+-- primary key is not a single `id` column).
+-- `create or replace` cannot change an existing function's return type, and
+-- an earlier revision of this file already shipped the `setof record`
+-- version, so drop first to make re-application idempotent.
+drop function if exists public.execute_readonly_sql(text);
+
 create or replace function public.execute_readonly_sql(query text)
-returns setof record
+returns table(id text)
 language plpgsql
 security definer
 set search_path = public
