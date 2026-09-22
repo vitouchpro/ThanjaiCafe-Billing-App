@@ -1,9 +1,7 @@
 // supabase/functions/enrol-device/index.ts
 // Called by an authenticated owner/manager to create a new device identity.
-// Authorization (membership check) is completed in Task 4; until then this
-// function trusts any authenticated caller, which is why Task 4 must land
-// before this function is deployed to a public URL (mirrors the Phase 0
-// rule for publish-menu/backup-bills).
+// Authorization is enforced by the membership check below (Task 4): the
+// caller must hold an active owner/manager membership on the target shop.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { buildCorsHeaders } from '../_shared/cors.ts';
 
@@ -25,6 +23,17 @@ Deno.serve(async (req) => {
   const { data: { user }, error: userErr } = await anon.auth.getUser();
   if (userErr || !user) {
     return json({ error: 'unauthenticated' }, 401, cors);
+  }
+
+  const { data: membership } = await anon
+    .from('memberships')
+    .select('role')
+    .eq('user_id', user.id)
+    .eq('shop_id', (await req.clone().json()).shopId)
+    .eq('active', true)
+    .maybeSingle();
+  if (!membership || !['owner', 'manager'].includes(membership.role)) {
+    return json({ error: 'not authorized for this shop' }, 403, cors);
   }
 
   const { shopId, code, role } = await req.json();
