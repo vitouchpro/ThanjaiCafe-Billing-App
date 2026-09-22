@@ -36,6 +36,10 @@ check('device sees only its own shop approvals', (seen.data ?? []).length === 1 
 const forged = await client.from('approvals').insert(approvalRow(shopB.id, managerB.id));
 check('device cannot insert an approval for another shop', forged.error?.code === '42501', forged.error?.code ?? 'no error');
 
+const seenOwn = await client.from('approvals').select('id').eq('shop_id', shopA.id).single();
+const tamper = await client.from('approvals').update({ action: 'void_after_kot' }).eq('id', seenOwn.data.id);
+check('cannot rewrite an approval field other than consuming it', tamper.error?.code === '42501', tamper.error?.code ?? 'no error');
+
 await admin.from('approvals').delete().in('shop_id', [shopA.id, shopB.id]);
 await admin.from('staff').delete().in('id', [managerA.id, managerB.id]);
 await admin.from('devices').delete().eq('auth_user_id', user.user.id);
