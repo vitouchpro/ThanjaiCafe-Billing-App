@@ -1427,13 +1427,14 @@ alter table public.day_closes enable row level security;
 create policy invoice_series_read on public.invoice_series for select to authenticated using (public.has_shop_access(shop_id));
 
 create policy bills_read on public.bills for select to authenticated using (public.has_shop_access(shop_id));
+-- Bills are created only by a device session acting as itself — never by an
+-- owner/manager session, which has no till context to bill from (spec: every
+-- write records staff_id and device_id; corrections go through bill_events /
+-- credit_notes, never a direct bill insert by an admin session).
 create policy bills_insert on public.bills for insert to authenticated
   with check (
     public.has_shop_access(shop_id)
-    and (
-      nullif((select auth.jwt()) ->> 'device_id', '') is null
-      or device_id = ((select auth.jwt()) ->> 'device_id')::uuid
-    )
+    and device_id = nullif((select auth.jwt()) ->> 'device_id', '')::uuid
   );
 
 create policy bill_lines_read on public.bill_lines for select to authenticated using (public.has_shop_access(shop_id));
@@ -1458,7 +1459,10 @@ create policy bill_events_insert on public.bill_events for insert to authenticat
   );
 
 create policy day_closes_read on public.day_closes for select to authenticated using (public.has_shop_access(shop_id));
-create policy day_closes_insert on public.day_closes for insert to authenticated with check (public.has_shop_access(shop_id));
+-- Same device-only insert rule as bills (Task 11): a day close is that
+-- device's own drawer close, never fabricated by an owner/manager session.
+create policy day_closes_insert on public.day_closes for insert to authenticated
+  with check (public.has_shop_access(shop_id) and device_id = nullif((select auth.jwt()) ->> 'device_id', '')::uuid);
 
 grant select on public.bills, public.bill_lines, public.bill_payments, public.bill_events, public.day_closes, public.invoice_series to authenticated;
 grant insert on public.bills, public.bill_lines, public.bill_payments, public.bill_events, public.day_closes to authenticated;
@@ -2116,7 +2120,10 @@ create policy availability_schedules_write on public.availability_schedules for 
 create policy availability_schedules_update on public.availability_schedules for update to authenticated using (public.has_shop_access(shop_id)) with check (public.has_shop_access(shop_id));
 
 create policy shifts_read on public.shifts for select to authenticated using (public.has_shop_access(shop_id));
-create policy shifts_write on public.shifts for insert to authenticated with check (public.has_shop_access(shop_id));
+-- Same device-only insert rule as bills (Task 11): a shift belongs to the
+-- device that opened it, never fabricated by an owner/manager session.
+create policy shifts_write on public.shifts for insert to authenticated
+  with check (public.has_shop_access(shop_id) and device_id = nullif((select auth.jwt()) ->> 'device_id', '')::uuid);
 create policy shifts_update on public.shifts for update to authenticated using (public.has_shop_access(shop_id)) with check (public.has_shop_access(shop_id));
 
 create policy cash_movements_read on public.cash_movements for select to authenticated using (public.has_shop_access(shop_id));
