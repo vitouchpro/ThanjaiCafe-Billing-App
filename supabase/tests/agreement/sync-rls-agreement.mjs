@@ -96,6 +96,17 @@ for (const { table, whereClause } of queries) {
   check(`${table}: sync-stream scope matches RLS scope${manifestByTable.has(table) ? ' (seeded)' : ''}`, agree, `sync=${syncIds.size} rls=${rlsIds.size}`);
 }
 
+// Delete every row seeded into the manifest tables above before tearing down
+// the shop/device/account: bills, shifts etc. reference devices/shops with no
+// cascade, so deleting devices/shops first would fail with FK violations and
+// (since these delete calls' errors go unchecked) silently leak orphaned test
+// data into the target database on every run.
+for (const t of new Set([...manifestByTable.keys()].filter((table) => queries.some((q) => q.table === table)))) {
+  const entry = manifestByTable.get(t);
+  if (!entry || entry.shopScoped === false) continue;
+  await admin.from(t).delete().eq('shop_id', shop.id);
+}
+
 await admin.from('devices').delete().eq('id', device.id);
 await admin.from('shops').delete().eq('id', shop.id);
 await admin.from('accounts').delete().eq('id', account.id);
