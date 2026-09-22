@@ -32,3 +32,18 @@ jobs:
         run: supabase db push
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+  agreement-test:
+    needs: migrate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci
+      - run: node supabase/tests/agreement/sync-rls-agreement.mjs
+        env:
+          SPIKE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SPIKE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SPIKE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
