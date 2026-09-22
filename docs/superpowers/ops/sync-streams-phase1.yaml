@@ -27,8 +27,18 @@ streams:
 
   sales_recent:
     auto_subscribe: true
+    # NOTE (2026-09-23): the spec's "rolling 90-day window" was originally
+    # implemented here as `business_date >= (current_date - interval '90
+    # days')`, but PowerSync's Sync Streams validator rejects Postgres
+    # interval/current_date arithmetic ("Invalid SQLite cast" — not in its
+    # supported SQL subset). Dropped the filter to get a deployable config;
+    # syncs full bill history per shop for now. A real 90-day window needs a
+    # client-supplied date parameter instead (auth.parameter() bound to a
+    # value the app passes at connect time), matching the findings doc's own
+    # "5b: Sync window by client-supplied date — NOT TESTED" flag. Revisit
+    # before Phase 2 if device storage/sync-quota growth becomes a problem.
     queries:
-      - SELECT * FROM bills WHERE shop_id = auth.parameter('shop_id') AND business_date >= (current_date - interval '90 days')
+      - SELECT * FROM bills WHERE shop_id = auth.parameter('shop_id')
       - SELECT * FROM bill_lines WHERE shop_id = auth.parameter('shop_id')
       - SELECT * FROM bill_payments WHERE shop_id = auth.parameter('shop_id')
       - SELECT * FROM bill_events WHERE shop_id = auth.parameter('shop_id')
@@ -77,7 +87,9 @@ streams:
       - SELECT * FROM charges WHERE shop_id = auth.parameter('shop_id')
       - SELECT * FROM promotions WHERE shop_id = auth.parameter('shop_id')
       - SELECT * FROM price_lists WHERE shop_id = auth.parameter('shop_id')
-      - SELECT * FROM availability_schedules WHERE shop_id = auth.parameter('shop_id')
+      # days_of_week (int[]) and start_time/end_time (time) are outside
+      # PowerSync's directly-supported type set; cast to text (2026-09-23).
+      - SELECT id, shop_id, product_id, category_id, days_of_week::text AS days_of_week, start_time::text AS start_time, end_time::text AS end_time, rev FROM availability_schedules WHERE shop_id = auth.parameter('shop_id')
       - SELECT * FROM shifts WHERE shop_id = auth.parameter('shop_id')
       - SELECT * FROM cash_movements WHERE shop_id = auth.parameter('shop_id')
       - SELECT * FROM exceptions WHERE shop_id = auth.parameter('shop_id')
