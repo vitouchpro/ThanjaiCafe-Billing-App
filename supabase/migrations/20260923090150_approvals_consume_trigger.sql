@@ -24,5 +24,6 @@ begin
   return new;
 end $$;
 
+drop trigger if exists approvals_only_consume on public.approvals;
 create trigger approvals_only_consume before update on public.approvals
   for each row execute function public.approvals_only_consume();
