@@ -5,7 +5,10 @@ on:
     paths:
       - 'supabase/migrations/**'
   push:
-    branches: [main]
+    # docs/cafe-billing-saas-design is where Phase 0/1 work currently lands
+    # (main doesn't have it yet); keep main too so this activates without
+    # another edit once this branch is eventually merged there.
+    branches: [main, docs/cafe-billing-saas-design]
     paths:
       - 'supabase/migrations/**'
 
