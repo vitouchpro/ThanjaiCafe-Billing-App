@@ -1,0 +1,52 @@
+name: Database migrations
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/**'
+  push:
+    # docs/cafe-billing-saas-design is where Phase 0/1 work currently lands
+    # (main doesn't have it yet); keep main too so this activates without
+    # another edit once this branch is eventually merged there.
+    branches: [main, docs/cafe-billing-saas-design]
+    paths:
+      - 'supabase/migrations/**'
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Link project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+      - name: Dry-run on PRs
+        if: github.event_name == 'pull_request'
+        run: supabase db push --dry-run
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      - name: Push on merge to main
+        if: github.event_name == 'push'
+        run: supabase db push
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+  agreement-test:
+    needs: migrate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci
+      - run: node supabase/tests/agreement/sync-rls-agreement.mjs
+        env:
+          SPIKE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SPIKE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SPIKE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}

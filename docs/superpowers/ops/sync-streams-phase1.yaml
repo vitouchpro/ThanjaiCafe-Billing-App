@@ -1,0 +1,118 @@
+config:
+  edition: 3
+
+streams:
+  shop_core:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM shops WHERE id = auth.parameter('shop_id')
+      - SELECT * FROM devices WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM staff WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM settings WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM memberships WHERE shop_id = auth.parameter('shop_id')
+
+  catalog:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM categories WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM products WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM product_variants WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM modifier_groups WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM modifiers WHERE shop_id = auth.parameter('shop_id')
+
+  backoffice_catalog:
+    auto_subscribe: false
+    queries:
+      - SELECT * FROM product_costs WHERE shop_id = auth.parameter('shop_id') AND auth.parameter('device_role') = 'backoffice'
+
+  sales_recent:
+    auto_subscribe: true
+    # NOTE (2026-09-23): the spec's "rolling 90-day window" was originally
+    # implemented here as `business_date >= (current_date - interval '90
+    # days')`, but PowerSync's Sync Streams validator rejects Postgres
+    # interval/current_date arithmetic ("Invalid SQLite cast" — not in its
+    # supported SQL subset). Dropped the filter to get a deployable config;
+    # syncs full bill history per shop for now. A real 90-day window needs a
+    # client-supplied date parameter instead (auth.parameter() bound to a
+    # value the app passes at connect time), matching the findings doc's own
+    # "5b: Sync window by client-supplied date — NOT TESTED" flag. Revisit
+    # before Phase 2 if device storage/sync-quota growth becomes a problem.
+    queries:
+      - SELECT * FROM bills WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM bill_lines WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM bill_payments WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM bill_events WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM day_closes WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM invoice_series WHERE shop_id = auth.parameter('shop_id')
+
+  tax_and_credit:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM tax_profiles WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM tax_rules WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM credit_notes WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM approvals WHERE shop_id = auth.parameter('shop_id')
+
+  table_service:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM tables WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM tabs WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM tab_lines WHERE shop_id = auth.parameter('shop_id')
+
+  qr_and_kitchen:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM qr_points WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM stations WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM category_stations WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM qr_orders WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM qr_order_lines WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM kots WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM order_events WHERE shop_id = auth.parameter('shop_id')
+
+  bakery_and_stock:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM advance_orders WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM advance_payments WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM stock_items WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM stock_batches WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM stock_movements WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM wastage_entries WHERE shop_id = auth.parameter('shop_id')
+
+  pricing_and_cash:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM charges WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM promotions WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM price_lists WHERE shop_id = auth.parameter('shop_id')
+      # days_of_week (int[]) and start_time/end_time (time) are outside
+      # PowerSync's directly-supported type set; cast to text (2026-09-23).
+      - SELECT id, shop_id, product_id, category_id, days_of_week::text AS days_of_week, start_time::text AS start_time, end_time::text AS end_time, rev FROM availability_schedules WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM shifts WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM cash_movements WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM exceptions WHERE shop_id = auth.parameter('shop_id')
+
+  customers_and_loyalty:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM customers WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM loyalty_ledger WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM credit_accounts WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM credit_ledger WHERE shop_id = auth.parameter('shop_id')
+
+  channels_and_messaging:
+    auto_subscribe: false
+    queries:
+      - SELECT * FROM channels WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM channel_orders WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM message_templates WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM message_log WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM consents WHERE shop_id = auth.parameter('shop_id')
+
+  reporting:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM shop_daily_stats WHERE shop_id = auth.parameter('shop_id')
+      - SELECT * FROM audit_log WHERE shop_id = auth.parameter('shop_id')

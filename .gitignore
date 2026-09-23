@@ -31,3 +31,7 @@ table-qr-codes*.html
 
 .vercel
 .env*
+
+# Supabase CLI scratch
+supabase/.temp/
+supabase/.branches/

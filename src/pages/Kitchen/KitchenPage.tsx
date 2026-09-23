@@ -3,6 +3,7 @@ import { CheckCircle2, ChefHat, Clock, Flame, Printer, ShoppingBag, WifiOff } fr
 import clsx from 'clsx';
 import { useAppStore } from '@/store/useAppStore';
 import { useOrderIntake } from '@/features/orders/useOrderIntake';
+import { useKotAutoPrint } from '@/features/orders/useKotAutoPrint';
 import { advanceStatus } from '@/services/cloud/orders';
 import { printKot } from '@/services/billing/kot';
 import { isCloudConfigured } from '@/services/cloud/client';
@@ -34,7 +35,10 @@ function nextStep(status: OrderStatus): { to: OrderStatus; label: string } | nul
 
 export function KitchenPage() {
   const businessName = useAppStore((s) => s.settings.business.name);
-  const { orders, error } = useOrderIntake(true);
+  const autoPrintKot = useAppStore((s) => s.settings.receipt.autoPrintKot ?? false);
+  // The kitchen displays orders; only a till bills them (see ordersToClaim).
+  const { orders, error, loaded } = useOrderIntake(true, { createBills: false });
+  useKotAutoPrint(orders, loaded && autoPrintKot, businessName);
   const [now, setNow] = useState(() => Date.now());
 
   // Ticks the "waiting for" clocks and the 15-minute warning treatment.

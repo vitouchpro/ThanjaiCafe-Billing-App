@@ -20,9 +20,11 @@ import type { Permission } from '@/types';
 /* useOrderAlerts subscribes to live order intake, which is only meaningful
    for someone who can see billing. It is always called (hooks can't branch)
    but its result is discarded for anyone without the permission, so the nav
-   badge never appears for a role that can't act on it. */
+   badge never appears for a role that can't act on it. The badge instances
+   only count and never bill (createBills: false); the billing intake runs in
+   OrderAlertHost, and on /kitchen nothing bills at all. */
 function useNavOrderBadge(allowed: boolean): number {
-  const { unseen } = useOrderAlerts();
+  const { unseen } = useOrderAlerts({ createBills: false });
   return allowed ? unseen : 0;
 }
 

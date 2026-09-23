@@ -28,6 +28,13 @@ export async function claimOrder(orderId: string): Promise<boolean> {
   return Boolean(data?.length);
 }
 
+/** The orders this device should claim and bill. A kitchen screen passes
+    createBills=false: it displays orders, and must not write a bill into its own
+    local database where the till would never see it. */
+export function ordersToClaim(list: CloudOrder[], createBills: boolean): CloudOrder[] {
+  return createBills ? list.filter((o) => o.status === 'PAID') : [];
+}
+
 /** An order that was paid for but could not be turned into a bill. */
 export interface OrderProblem {
   orderId: string;
@@ -38,9 +45,13 @@ export interface OrderProblem {
   numberSpent: boolean;
 }
 
-export function useOrderIntake(enabled: boolean) {
+export function useOrderIntake(enabled: boolean, options: { createBills?: boolean } = {}) {
+  const createBills = options.createBills ?? true;
   const [orders, setOrders] = useState<CloudOrder[]>([]);
   const [error, setError] = useState<string | null>(null);
+  /* True once the first fetch has succeeded. Consumers that must not react to
+     what was already on the board at load (auto-print) wait for this. */
+  const [loaded, setLoaded] = useState(false);
 
   /* A customer has paid. If the bill cannot be written, that must reach a human
      rather than a console nobody is reading — either the order is structurally
@@ -63,12 +74,13 @@ export function useOrderIntake(enabled: boolean) {
         if (cancelled) return;
         setOrders(list);
         setError(null);
+        setLoaded(true);
 
         // Auto-accept: every PAID order becomes a bill on whichever till
         // wins the claim. orderToBill can throw (bad status, no lines, a
         // total that disagrees with the gateway) — one bad order must not
         // stall every other order in this refresh.
-        for (const order of list.filter((o) => o.status === 'PAID')) {
+        for (const order of ordersToClaim(list, createBills)) {
           if (!await claimOrder(order.id)) continue;
 
           const store = useAppStore.getState();
@@ -154,7 +166,7 @@ export function useOrderIntake(enabled: boolean) {
     const poll = setInterval(() => { void refresh(); }, 30_000);
 
     return () => { cancelled = true; unsubscribe(); clearInterval(poll); };
-  }, [enabled]);
+  }, [enabled, createBills]);
 
-  return { orders, error, problems };
+  return { orders, error, problems, loaded };
 }
