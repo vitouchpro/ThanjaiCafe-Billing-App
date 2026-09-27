@@ -1,5 +1,6 @@
 import { supabase } from './client';
 import { KITCHEN_VISIBLE } from './status';
+import { createKitchenFeed } from './kitchenFeed';
 import type { CloudOrder, CloudOrderLine, OrderStatus } from '@/types/order';
 
 type Row = Record<string, unknown>;
@@ -64,38 +65,35 @@ export function subscribeToOrder(id: string, onChange: (o: CloudOrder) => void):
 
 /** Live paid orders — what the kitchen screen and the till watch.
     Unpaid orders are filtered out here as well as in the query, so no code
-    path can put an unpaid ticket in front of the kitchen. */
+    path can put an unpaid ticket in front of the kitchen.
+
+    One round trip: the lines are embedded through the order_lines foreign
+    key instead of a second query. Errors throw rather than returning [], so a
+    network blip keeps the board as it was instead of emptying it. */
 export async function fetchKitchenOrders(): Promise<CloudOrder[]> {
   if (!supabase) return [];
-  const { data: orders } = await supabase
-    .from('orders').select('*').in('status', KITCHEN_VISIBLE).order('created_at');
-  if (!orders?.length) return [];
-  const ids = orders.map((o: Row) => String(o.id));
-  const { data: lines } = await supabase.from('order_lines').select('*').in('order_id', ids);
-  const byOrder = new Map<string, Row[]>();
-  for (const l of (lines ?? []) as Row[]) {
-    const k = String(l.order_id);
-    byOrder.set(k, [...(byOrder.get(k) ?? []), l]);
-  }
-  return (orders as Row[]).map((o) => rowToOrder(o, byOrder.get(String(o.id)) ?? []));
+  const { data, error } = await supabase
+    .from('orders')
+    .select('*, order_lines(*)')
+    .in('status', KITCHEN_VISIBLE)
+    .order('created_at');
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as Row[]).map((o) =>
+    rowToOrder(o, Array.isArray(o.order_lines) ? (o.order_lines as Row[]) : []));
 }
 
 let channelSeq = 0;
 
+/** Raw change stream on the orders table. Use `kitchenFeed` instead: it shares
+    ONE of these per device across every screen that watches the queue. */
 export function subscribeToKitchen(onChange: () => void): () => void {
   if (!supabase) return () => {};
 
-  /* A UNIQUE channel name per subscriber, not a shared 'kitchen'.
-
-     supabase-js hands back the SAME channel object for a name that already
-     exists, and calling .on() on one that has already subscribed throws
-     "cannot add postgres_changes callbacks after subscribe()". That happens
-     two ways here: React StrictMode mounts every effect twice in development,
-     and three separate places subscribe at once — the alert host (mounted on
-     every staff screen), the kitchen board, and the online orders page.
-
-     The throw propagated out of the effect and took the whole till to its
-     error boundary immediately after login. */
+  /* A unique channel name per call. supabase-js hands back the SAME channel
+     object for a name that already exists, and calling .on() on one that has
+     already subscribed throws "cannot add postgres_changes callbacks after
+     subscribe()" — React StrictMode mounting effects twice is enough to hit
+     it, and the throw once took the whole till to its error boundary. */
   const client = supabase;
   const channel = client
     .channel(`kitchen-${++channelSeq}`)
@@ -105,6 +103,13 @@ export function subscribeToKitchen(onChange: () => void): () => void {
   return () => { void client.removeChannel(channel); };
 }
 
+/** The device-wide kitchen queue: one channel, one debounced fetch, one poll,
+    shared by the alert host, the kitchen board and the online-orders page. */
+export const kitchenFeed = createKitchenFeed({
+  fetchOrders: fetchKitchenOrders,
+  subscribe: subscribeToKitchen,
+});
+
 export async function advanceStatus(id: string, to: OrderStatus): Promise<void> {
   if (!supabase) throw new Error('Online ordering is not configured');
   const stamp: Record<string, string> = {};
@@ -112,4 +117,6 @@ export async function advanceStatus(id: string, to: OrderStatus): Promise<void> 
   if (to === 'SERVED') stamp.served_at = new Date().toISOString();
   const { error } = await supabase.from('orders').update({ status: to, ...stamp }).eq('id', id);
   if (error) throw new Error(error.message);
+  // Show the tap on this screen at once rather than waiting for the echo.
+  void kitchenFeed.refresh();
 }
