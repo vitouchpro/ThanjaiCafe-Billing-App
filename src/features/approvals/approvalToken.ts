@@ -12,7 +12,7 @@ export async function generateManagerKeyPair(): Promise<CryptoKeyPair> {
   return crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
 }
 
-function payloadBytes(payload: ApprovalPayload): Uint8Array {
+function payloadBytes(payload: ApprovalPayload): Uint8Array<ArrayBuffer> {
   return new TextEncoder().encode(JSON.stringify(payload));
 }
 
